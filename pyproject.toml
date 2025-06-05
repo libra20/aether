@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aether"
+version = "0.1.0"
+description = "A lightweight utility library born from chaos and aspiring to elegance."
+readme = "README.md"
+authors = [
+    { name = "Fujihara Shunya", email = "sierra.fujihara@gmail.com" }
+]
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/libra20/aether"
+
+[tool.setuptools.packages.find]
+include = ["aether"]
