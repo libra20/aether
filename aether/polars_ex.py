@@ -6,6 +6,8 @@ import altair as alt
 import types
 from typing import Sequence, Optional, Union
 
+from tqdm import tqdm
+
 
 """
 ★read_csv_or_parquet関数 ※csvをparquetにしといて次から早く読む自作関数
@@ -74,12 +76,42 @@ def _format_sig(x: float, sig_digits: int) -> str:
 """
 def describe_ex(df: pl.DataFrame, detailed: bool = None, sig_digits: int = 2) -> pl.DataFrame:
     """
-    拡張describe関数。
+    Polars DataFrame に対して拡張統計要約を行う関数。
 
-    - デフォルトのdescribeに加え、型情報・欠損・最頻値などを追加。
-    - 数値はsig_digits桁で丸めて表示。
-    - 非detailedモードでは標準describeの文字列整形版を返す。
-    - detailed=True で全行出力。
+    デフォルトの `df.describe()` に加え、以下の情報も表示する：
+    - 欠損数（missing）、非欠損数（non-missing）
+    - 平均、標準偏差、中央値、最頻値（top）とその件数（top_count）
+    - ユニーク値数（n_unique）
+    - データ型（dtype）
+
+    パラメータ
+    ----------
+    df : pl.DataFrame
+        対象の Polars データフレーム。
+
+    detailed : bool, optional
+        True の場合、全統計情報を出力。False または None の場合、`df.describe()` 相当の出力を整形して返す。
+        None のときはグローバル変数 `detailed` を参照（未定義時は False 扱い）。
+
+    sig_digits : int, optional (default=2)
+        数値の有効桁数。None の場合は丸め処理を行わない。
+
+    戻り値
+    -------
+    pl.DataFrame
+        統計情報を文字列型でまとめた DataFrame。各列に対する統計値を行方向に表示。
+
+    使用例
+    -------
+    >>> import polars as pl
+    >>> df = pl.DataFrame({"x": [1, 2, 2, None], "y": ["a", "b", "a", "a"]})
+    >>> describe_ex(df, detailed=True)
+
+    備考
+    ----
+    - detailed=False の場合、`pl.DataFrame.describe()` に近い形式（整形済）を返す。
+    - 非数値列（文字列など）でも top やユニーク件数などを集計可能。
+    - 型情報や欠損状況なども一緒に確認したい場合に便利。
     """
     if detailed is None:
         detailed = globals().get("detailed", False)
@@ -177,168 +209,6 @@ pl.DataFrame.describe_ex = describe_ex
 
 
 """
-★tabulate_data_frames関数
-"""
-def tabulate_data_frames(
-    *dfs: pl.DataFrame,
-    dfs_name: list[str] = ['train', 'test'],
-    dfs_color: list[str] = ['lightblue', 'lightpink'],
-    use_dark_theme: bool = True,
-    use_compact_style: bool = True,
-    label_columns: list[str] | None = ['statistic'],
-    sig_digits: int | None = 3,
-    show_dtype_row: bool = False  # ← 追加
-):
-    """
-    複数の Polars DataFrame を比較しやすい表形式に整形して返す。
-    型情報行と視覚的なスタイルオプション付き。
-    """
-    from IPython.display import HTML
-    from great_tables import GT, style, loc, px
-
-
-    num_dfs = len(dfs)
-    assert num_dfs >= 1, "1つ以上のDataFrameが必要です"
-
-    if dfs_name is None:
-        dfs_name = [f"df{i+1}" for i in range(num_dfs)]
-    if dfs_color is None:
-        dfs_color = ["lightgray"] * num_dfs
-
-    dfs_name = dfs_name[:num_dfs]
-    dfs_color = dfs_color[:num_dfs]
-    label_columns = label_columns or []
-
-    # ラベル列の処理
-    if label_columns:
-        for col in label_columns:
-            for df in dfs:
-                assert col in df.columns, f"{col} が全てのDataFrameに必要です"
-        label_df = dfs[0].select(label_columns)
-        dfs_raw = tuple(df.drop(label_columns) for df in dfs)
-    else:
-        label_df = None
-        dfs_raw = dfs
-
-    schema_info = [df.schema for df in dfs_raw]
-    label_schema = dfs[0].schema if label_columns else {}
-
-    # sig_digits の適用
-    if sig_digits is not None:
-        dfs = tuple(
-            df.with_columns([
-                pl.col(col).map_elements(lambda x: _format_sig(x, sig_digits), return_dtype=pl.String).alias(col)
-                for col in df.columns
-            ]) for df in dfs_raw
-        )
-    else:
-        dfs = dfs_raw
-
-    # カラム名に df名 を追加
-    dfs_named = []
-    column_to_color, column_to_df, column_to_full = {}, {}, {}
-
-    for i, (df, name, color) in enumerate(zip(dfs, dfs_name, dfs_color)):
-        renamed_cols = {}
-        for col in df.columns:
-            new_col = col if num_dfs == 1 else f"{col} ({name})"
-            renamed_cols[col] = new_col
-            column_to_color[new_col] = color
-            column_to_df.setdefault(col, []).append(i)
-            column_to_full.setdefault(col, []).append(new_col)
-        dfs_named.append(df.rename(renamed_cols))
-
-    df_combined = pl.concat(dfs_named, how="horizontal")
-
-    if label_df is not None:
-        df_combined = label_df.hstack(df_combined)
-        if num_dfs > 1:
-            df_combined = _reorder_columns_by_df_map(df_combined, label_columns, column_to_full, column_to_df)
-    else:
-        if num_dfs > 1:
-            df_combined = _reorder_columns_by_df_map(df_combined, [], column_to_full, column_to_df)
-
-    # 型情報の1行目を追加
-    if show_dtype_row:
-        dtype_row = {}
-        for schema, name in zip(schema_info, dfs_name):
-            for col in schema:
-                full_col = col if num_dfs == 1 else f"{col} ({name})"
-                dtype_row[full_col] = str(schema[col])
-        for col in label_columns:
-            dtype_row[col] = str(label_schema.get(col, ""))
-
-        dtype_row_filled = {col: dtype_row.get(col, "") for col in df_combined.columns}
-        df_combined = pl.concat([pl.DataFrame([dtype_row_filled]), df_combined], how="vertical")
-
-    # GreatTables スタイル適用
-    table = GT(df_combined)
-    if use_dark_theme:
-        table = table.tab_options(
-            table_background_color="#1e1e1e",
-            heading_background_color="#2e2e2e",
-            row_group_background_color="#2e2e2e",
-            table_border_top_color="#444444",
-            table_border_bottom_color="#444444"
-        )
-    if use_compact_style:
-        table = table.tab_options(
-            data_row_padding=px(2),
-            row_group_padding=px(2),
-            heading_title_font_size="small",
-            heading_subtitle_font_size="small",
-            table_font_size="small"
-        )
-        table = table.opt_vertical_padding(scale=0.5)
-        table = table.opt_horizontal_padding(scale=0.7)
-
-    for col in df_combined.columns:
-        if col in label_columns:
-            continue
-        color = column_to_color.get(col)
-        if color:
-            table = table.tab_style(style=style.text(color=color), locations=loc.body(columns=col))
-            table = table.tab_style(style=style.text(color=color), locations=loc.column_labels(columns=col))
-
-    if show_dtype_row:
-        table = table.tab_style(style=style.borders(sides="top", color="#888", style="solid", weight="2px"), locations=loc.body(rows=[0]))
-        table = table.tab_style(style=style.borders(sides="bottom", color="#888", style="solid", weight="2px"), locations=loc.body(rows=[0]))
-        table = table.tab_style(style=style.text(color="#bbb", weight="bold"), locations=loc.body(rows=[0]))
-
-    # return table
-    # 他と合わせるため左寄せにする
-    table_html = HTML(f"""
-        <div style="text-align: left; display: inline-block;">
-        {table._repr_html_()}
-        </div>
-        """)
-    return table_html
-
-def _reorder_columns_by_df_map(
-    df: pl.DataFrame,
-    label_columns: list[str],
-    column_to_full: dict[str, list[str]],
-    column_to_df: dict[str, list[int]]
-) -> pl.DataFrame:
-    """
-    各 base列（括弧の前）を、dfの順に揃えて交互に並べる。
-    label_columns はそのまま先頭に維持。
-
-    例：
-        df1: x, y   df2: x  → x (train), x (test), y (train)
-    """
-    base_order = [base for base in column_to_full if any(col in df.columns for col in column_to_full[base])]
-    ordered_cols = label_columns[:]
-    for base in base_order:
-        for idx in column_to_df[base]:
-            if idx < len(column_to_full[base]):
-                col = column_to_full[base][idx]
-                if col in df.columns:
-                    ordered_cols.append(col)
-    return df.select(ordered_cols)
-
-
-"""
 ★get_bin_columns関数
 """
 def get_bin_column(
@@ -349,6 +219,51 @@ def get_bin_column(
     dt_truncate_unit: str = "1mo",
     verbose:bool = False
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    指定列に対してビニング（bin列の追加）を行い、各DataFrameに対応するbin列とbin情報を返す関数。
+
+    数値・日時・カテゴリ型に対応し、ビニングの方法を自動的に判別する。
+
+    パラメータ
+    ----------
+    *dfs : pl.DataFrame
+        処理対象の複数の Polars DataFrame。対象列が存在するものだけを処理対象とする。
+
+    col : str
+        ビニング対象の列名。
+
+    num_n_bins : int, optional (default=10)
+        数値列のときに作成するビンの最大数。`matplotlib.ticker.MaxNLocator` を用いて自動で区切る。
+
+    num_sig_digits : int, optional (default=3)
+        数値列のビン境界値を有効数字で丸める桁数。
+
+    dt_truncate_unit : str, optional (default="1mo")
+        日付・日時列に対して `.dt.truncate()` する際の単位（例: "1mo", "1d" など）。
+
+    verbose : bool, optional (default=False)
+        中間処理の表示を行う（Jupyterなどで `display()` を使用）。
+
+    戻り値
+    -------
+    tuple[pl.DataFrame, ..., pl.DataFrame]
+        - 各入力 DataFrame に対応する bin 列だけを持つ DataFrame のタプル（入力の順に並ぶ）。
+        - 最後の要素は bin の詳細情報（開始、終了、中央値など）を持つ DataFrame（数値・日付列のときのみ）。
+
+    使用例
+    -------
+    >>> df1 = pl.DataFrame({"val": [1, 2, 3, 4, 5]})
+    >>> df2 = pl.DataFrame({"val": [6, 7, 8, 9, 10]})
+    >>> df1_bin, df2_bin, df_bin_info = get_bin_column(df1, df2, col="val")
+
+    備考
+    ----
+    - 数値列の場合：等間隔ビンに分割し、`cut` によってラベルを付けたカテゴリ列を生成。
+    - 日付・日時列の場合：`dt.truncate()` により期間単位でビンを作成。
+    - 文字列・カテゴリ列の場合：元の値をそのまま bin として利用。
+    - 元の列が存在しない DataFrame に対しては、すべて `None` の bin 列を返す。
+    - bin詳細（`_start`, `_end`, `_median`）は最終返却要素に格納。
+    """
     import matplotlib.ticker as mticker
 
 
@@ -504,10 +419,69 @@ def _make_bin_labels(bins: list[float]) -> list[str]:
 ★plot_histogram関数
 - ↑のbinning関数を内部で使って、それを使って集計したものをHistogramにする処理
 """
-def plot_histogram(df: pl.DataFrame, col_bin: str, df_bin_detail_info:pl.DataFrame=None, 
-                   col_color:str=None, bar_opacity:float=0.5, num_x_scale_zero:bool=False, 
-                   normalize_histogram:bool=False, title:str=None, verbose:bool=False) -> alt.Chart:
-    
+def plot_histogram(
+    df: pl.DataFrame,
+    col_bin: str,
+    df_bin_detail_info: pl.DataFrame = None,
+    col_color: str = None,
+    bar_opacity: float = 0.5,
+    num_x_scale_zero: bool = False,
+    normalize_histogram: bool = False,
+    title: str = None,
+    verbose: bool = False
+) -> alt.Chart:
+    """
+    Altair でヒストグラム（棒グラフ）を描画する関数。
+
+    ビン列（カテゴリ、数値、または日付のビン）をもとに集計し、棒グラフとして表示する。
+    日付・数値ビンの場合は `df_bin_detail_info` を渡すことで棒の幅を明示的に設定可能。
+
+    パラメータ
+    ----------
+    df : pl.DataFrame
+        入力データ。ビン列を含んでいる必要がある。
+
+    col_bin : str
+        ビニング済みの列名（"xxx_bin" など）。棒グラフのX軸となる。
+
+    df_bin_detail_info : pl.DataFrame, optional
+        ビンの詳細情報（`_start`, `_end` 列など）を含むDataFrame。
+        これが指定されている場合、Altair の `x` と `x2` を用いて棒の幅を連続値として描画する。
+
+    col_color : str, optional
+        グループ毎に色分けしたい列名。None の場合は色分けしない。
+
+    bar_opacity : float, optional (default=0.5)
+        棒の透明度。
+
+    num_x_scale_zero : bool, optional (default=False)
+        X軸（連続値）のスケールにゼロを含めるかどうか。
+
+    normalize_histogram : bool, optional (default=False)
+        ヒストグラムを相対頻度（割合）として正規化するかどうか。
+
+    title : str, optional
+        グラフタイトル。None の場合は `col_bin` から自動推定。
+
+    verbose : bool, optional
+        処理途中のDataFrameを `display()` で表示するデバッグモード。
+
+    戻り値
+    -------
+    alt.Chart
+        Altair による棒グラフチャートオブジェクト。
+
+    使用例
+    -------
+    >>> chart = plot_histogram(df, col_bin="age_bin", df_bin_detail_info=bin_info)
+    >>> chart.display()
+
+    備考
+    ----
+    - `df_bin_detail_info` を渡すと、棒の幅や位置が連続的に表示され、視認性が向上する。
+    - カテゴリビンの場合は `x` のみ、連続ビンの場合は `x` + `x2` によるレンジ指定を行う。
+    - Polars と Altair を組み合わせて軽量な可視化が可能。
+    """    
     if verbose:
         print(f"col_bin: {col_bin}")
         print('df:')
@@ -597,6 +571,60 @@ def plot_line_point_over_bin(
     verbose: bool = False,
     color_scale_scheme: str = None,
 ) -> alt.Chart:
+    """
+    ビンごとにターゲット列を集約し、線＋点プロットを Altair で描画する関数。
+
+    集約されたターゲット値をビンの中央値またはカテゴリでX軸に、線と点の重ね合わせで視覚化する。
+    カラーグループでの比較や、bin情報の中間点指定にも対応。
+
+    パラメータ
+    ----------
+    df : pl.DataFrame
+        入力データ。ビン列・ターゲット列・（オプションで）カラー列を含む。
+
+    col_bin : str
+        ビニング列の名前。カテゴリまたは bin 情報に基づく列。
+
+    col_target : str
+        Y軸にプロットする対象列。数値型を想定。
+
+    col_color : str, optional
+        グループごとに線・点を色分けする列名。None の場合は単一色。
+
+    agg_func : Callable, optional (default=pl.mean)
+        ターゲット列の集約関数（例: `pl.mean`, `pl.median`, `pl.max` など）。
+
+    df_bin_detail_info : pl.DataFrame, optional
+        ビンの詳細情報を含む DataFrame。列 `{col_bin}_median` が含まれている場合、それをX軸に使用。
+
+    num_y_scale_zero : bool, optional
+        Y軸スケールに 0 を含めるかどうか（Altair の `scale.zero` オプション）。
+
+    point_size : int, optional (default=50)
+        プロットされる点のサイズ。
+
+    verbose : bool, optional
+        処理中の DataFrame を `display()` で表示するデバッグモード。
+
+    color_scale_scheme : str, optional
+        Altair のカラースキーム名（例: "category10", "tableau20" など）。指定しない場合はデフォルト。
+
+    戻り値
+    -------
+    alt.Chart
+        線（line）と点（point）を重ねた Altair の複合チャート。
+
+    使用例
+    -------
+    >>> chart = plot_line_point_over_bin(df, col_bin="age_bin", col_target="score", col_color="gender")
+    >>> chart.display()
+
+    備考
+    ----
+    - `df_bin_detail_info` が指定されていて `{col_bin}_median` が存在する場合、X軸にはその中央値を使う。
+    - 色と形は `col_color` によって自動的に変化し、凡例も自動表示される。
+    - `resolve_scale` により y 軸は共有され、color/shape は独立。
+    """
     col_target_agg = f'{col_target} ({agg_func.__name__})'
 
     # 集約
@@ -632,10 +660,7 @@ def plot_line_point_over_bin(
     return alt.layer(chart_line, chart_point).resolve_scale(y='shared', color='independent', shape='independent')
 
 
-"""
-★align_all_columns関数
-"""
-def align_all_columns(*dfs: pl.DataFrame) -> tuple[pl.DataFrame, ...]:
+def _align_all_columns(*dfs: pl.DataFrame) -> tuple[pl.DataFrame, ...]:
     if not dfs:
         raise ValueError("少なくとも1つのDataFrameが必要です")
 
@@ -666,10 +691,7 @@ def align_all_columns(*dfs: pl.DataFrame) -> tuple[pl.DataFrame, ...]:
     return tuple(aligned_dfs)
 
 
-"""
-★standardize_columns_by_first_df関数
-"""
-def standardize_columns_by_first_df(
+def _standardize_columns_by_first_df(
     *dfs: pl.DataFrame,
     col_list: list[str],
     verbose: bool = False
@@ -756,7 +778,98 @@ def plot_venn(
     verbose: bool = False,
 ) -> alt.Chart:
     """
-    PolarsデータからAltairでVenn図画像を表示するメイン関数。
+    AltairでVenn図（集合の重なり）を描画する関数。
+
+    与えられた Polars DataFrame を基に、エンティティ（例: ID）がどのカテゴリ（例: train/test/detail）に
+    含まれているかを可視化する。実際の描画は matplotlib を用いてVenn図を生成し、それを画像として Altair に埋め込む。
+
+    パラメータ
+    ----------
+    df : pl.DataFrame
+        入力データ。`col_entity` と `col_category` 列を含む必要がある。
+
+    col_entity : str
+        集合対象のエンティティ（例: ID）を示す列名。
+
+    col_category : str
+        各エンティティが所属するカテゴリ（例: train, test, detail）を示す列名。
+
+    category_order : list[str] or None, optional
+        Venn図に描画するカテゴリの順序。最大3カテゴリまで対応。
+
+    category_colors : dict[str, str] or None, optional
+        各カテゴリに割り当てる色（matplotlibのカラー名など）。
+
+    subtitle_label_fontsize : int, optional (default=28)
+        サブタイトル（重なりの説明）のフォントサイズ。
+
+    category_label_fontsize : int, optional (default=24)
+        各カテゴリ名のフォントサイズ。
+
+    count_label_fontsize : int, optional (default=20)
+        カウント（重なりの要素数）のフォントサイズ。
+
+    title : str, optional
+        グラフのタイトル。指定しない場合は `col_entity` が使用される。
+
+    verbose : bool, optional
+        デバッグ出力を有効にする。
+
+    戻り値
+    -------
+    alt.Chart
+        Venn図を埋め込んだ Altair の画像チャート。
+
+    使用例
+    -------
+    ```python
+    df_combined = pl.concat([
+        df_train.with_columns(pl.lit("train").alias("src")).select(["PID", "src"]),
+        df_test.with_columns(pl.lit("test").alias("src")).select(["PID", "src"]),
+        df_detail.with_columns(pl.lit("detail").alias("src")).select(["PID", "src"]),
+    ])
+    plot_venn(df_combined, col_entity="PID", col_category="src")    
+    ```
+
+    使用例2
+    -------
+    ```python
+    def compare_id(
+        df_train: pl.DataFrame,
+        df_test: pl.DataFrame,
+        df_detail: pl.DataFrame,
+        col_compare: str,
+        subtitle_label_fontsize: int = 18,
+        category_label_fontsize: int = 16,
+        count_label_fontsize: int = 12,
+        width=600,
+        height=200,
+    ) -> alt.Chart:
+        col_label = 'DataFrame'
+
+        # 各DataFrameにDataFrame名を示す列を追加し、PIDとその列だけを選択
+        df_train_labeled = df_train.with_columns(pl.lit("train").alias(col_label)).select([col_compare, col_label])
+        df_test_labeled = df_test.with_columns(pl.lit("test").alias(col_label)).select([col_compare, col_label])
+        df_detail_labeled = df_detail.with_columns(pl.lit("detail").alias(col_label)).select([col_compare, col_label])
+
+        df_combined = pl.concat([df_train_labeled, df_test_labeled, df_detail_labeled], how="vertical")
+
+        venn_chart = plot_venn(
+            df=df_combined,
+            col_entity=col_compare,
+            col_category=col_label,
+            subtitle_label_fontsize = subtitle_label_fontsize,
+            category_label_fontsize = category_label_fontsize,
+            count_label_fontsize = count_label_fontsize,
+        ).properties(width=width, height=height)
+        return venn_chart
+    ```
+
+    備考
+    ----
+    - matplotlib による描画を Altair に埋め込む特殊処理を行っているため、データとしての直接描画ではない。
+    - `_draw_venn_matplotlib_dual()` と `_matplotlib_to_altair()` に依存しており、これらの補助関数が必要。
+    - 最大3カテゴリまで対応（matplotlibのVenn制約による）。
     """
     import matplotlib.pyplot as plt
     plt.style.use('dark_background')
@@ -783,6 +896,7 @@ def plot_venn(
     if title is None:
         title = col_entity
     return chart_altair.properties(title=title)
+
 
 def _draw_venn_matplotlib_dual(
     df: pl.DataFrame,
@@ -832,6 +946,7 @@ def _draw_venn_matplotlib_dual(
     )
 
     return fig
+
 
 def _draw_venn_matplotlib(
     df: pl.DataFrame,
@@ -964,6 +1079,7 @@ def _draw_venn_matplotlib(
         ax.set_title(subtitle, fontsize=subtitle_label_fontsize,
         )
 
+
 def _matplotlib_to_altair(
     fig: plt.Figure,
 ) -> alt.Chart:
@@ -985,12 +1101,105 @@ def _matplotlib_to_altair(
     return alt.Chart().mark_image(
         url=image_url,
     )
+
+
 """
-★plot_histogram_line_overlay関数
-- plot_histogram, plot_line_point_over_bin関数を使うHistogram描画テンプレ→使いまわし用に関数化しただけ
-- df単品とか、col_targetなしには非対応なので、関数を解いて個別の処理を作るべし
+★profile関数
 """
-def plot_histogram_line_overlay(
+def profile(
+        *dfs,
+        col_target=None,
+        num_n_bins = 10,
+        width_chart = 200,
+        height_chart = 200,
+        columns_concat_chart = 2,
+        str_col_bin_unique_limit:int = 100,
+        standardize_line = True,
+        normalize_histogram = True,
+        tabulate_dfs_color: list[str] = ['lightblue', 'lightpink'],
+        verbose = False,
+        ):
+    """
+    複数のDataFrameを対象に、全列に対するプロファイリング可視化とサマリ表を表示する関数。
+
+    各列に対してヒストグラムまたは折れ線グラフを描画し、比較可能な形式で横並びに表示。
+    数値・カテゴリ・文字列などの型に応じて適切なビニングや標準化・正規化処理を行う。
+    また、各DataFrameに対する `describe_ex()` の結果を色分けして表形式で表示。
+
+    パラメータ
+    ----------
+    *dfs : DataFrame(s)
+        プロファイリング対象となる Polars データフレーム（複数可）。
+
+    col_target : str, optional
+        折れ線グラフとしてプロットする際のターゲット列（例：目的変数）。None の場合は省略。
+
+    num_n_bins : int, optional (default=10)
+        数値列のビン数。ビニングは `_draw_profile_graph()` 内部で自動処理される。
+
+    width_chart : int, optional
+        各チャートの横幅（ピクセル単位）。
+
+    height_chart : int, optional
+        各チャートの高さ（ピクセル単位）。
+
+    columns_concat_chart : int, optional
+        表示時に1行に並べるチャートの数（Altairの `alt.concat(..., columns=...)` に対応）。
+
+    str_col_bin_unique_limit : int, optional (default=100)
+        文字列・カテゴリ列で表示するユニーク値の最大数。超えるとスキップされる。
+
+    standardize_line : bool, optional (default=True)
+        折れ線グラフを標準化（平均0, 分散1）して比較するかどうか。
+
+    normalize_histogram : bool, optional (default=True)
+        ヒストグラムを正規化（相対頻度）するかどうか。
+
+    tabulate_dfs_color : list[str], optional
+        `describe_ex()` の出力に対して色を付けるためのリスト。DataFrameの順番に対応。
+
+    verbose : bool, optional
+        デバッグ出力を有効にする。
+
+    戻り値
+    -------
+    None
+        Altair チャートおよび HTML テーブルが notebook 上で `display()` によって表示される。
+
+    使用例
+    -------
+    >>> profile(df_train, df_test, col_target="target")
+
+    備考
+    ----
+    - チャートは Altair を使用しており、Jupyter Notebook / JupyterLab 上での可視化を想定。
+    - `_draw_profile_graph()` や `_draw_profile_table()` などの補助関数に依存。
+    - `describe_ex()` を使って拡張サマリを生成しており、型や欠損、最頻値なども表で確認可能。
+    """
+    columns = _get_ordered_unique_columns(dfs)
+    charts = []
+    # for col in tqdm(df.columns):
+    pbar = tqdm(columns, desc="Start", leave=False)
+    for col in pbar:
+        pbar.set_description(f"Processing... (col: {col})")
+        chart = _draw_profile_graph(
+            *dfs, col=col, col_target=col_target, num_n_bins=num_n_bins,
+            # df1, col=col, col_target=col_target, num_n_bins=num_n_bins,
+            str_col_bin_unique_limit=str_col_bin_unique_limit,
+            standardize_line=standardize_line, normalize_histogram=normalize_histogram, verbose=verbose)
+        if chart is not None:
+            charts.append(chart.properties(width=width_chart, height=height_chart))
+    # print(f"Processing... (alt.concat)")
+    for _ in tqdm(range(1), desc=f"Processing... (alt.concat(columns={columns_concat_chart}))", leave=False):
+        chart_all = alt.concat(*charts, columns=columns_concat_chart)
+    display(chart_all)
+
+    dfs_describe = [df.describe_ex() for df in dfs]
+    table = _draw_profile_table(*dfs_describe, dfs_color=tabulate_dfs_color)
+    display(table)
+
+
+def _draw_profile_graph(
     *dfs:pl.DataFrame,
     col:str,
     col_target: Optional[Union[str, list[str]]] = None, # Union[str, list[str]],
@@ -1007,6 +1216,10 @@ def plot_histogram_line_overlay(
     str_col_bin_unique_limit:int = 100,
     verbose:bool=False,
 ):
+    """
+    - profile関数(グラフ＋表を全列分表示)のグラフ描画処理
+    - plot_histogram, plot_line_point_over_bin, plot_venn関数などを使う
+    """
     from typing import Union, Optional
 
 
@@ -1034,7 +1247,7 @@ def plot_histogram_line_overlay(
     ]
 
     # 列を揃える(ない場合は値がすべてNullの列となる)
-    dfs_aligned = align_all_columns(*dfs)
+    dfs_aligned = _align_all_columns(*dfs)
 
     # bin列を作る(未結合)
     *dfs_bin, df_bin_detail_info = get_bin_column(
@@ -1095,7 +1308,7 @@ def plot_histogram_line_overlay(
 
     # 標準化する(オプション)
     if standardize_line and col_target_list:
-        dfs_with_bin = standardize_columns_by_first_df(
+        dfs_with_bin = _standardize_columns_by_first_df(
             *dfs_with_bin, col_list=col_target_list
         )
 
@@ -1194,46 +1407,165 @@ def plot_histogram_line_overlay(
     return chart
 
 
-"""
-★profile関数
-"""
-def profile(
-        *dfs,
-        col_target=None,
-        num_n_bins = 10,
-        width_chart = 200,
-        height_chart = 200,
-        columns_concat_chart = 2,
-        str_col_bin_unique_limit:int = 100,
-        standardize_line = True,
-        normalize_histogram = True,
-        tabulate_dfs_color: list[str] = ['lightblue', 'lightpink'],
-        verbose = False,
-        ):
-    from tqdm import tqdm
+def _draw_profile_table(
+    *dfs: pl.DataFrame,
+    dfs_name: list[str] = ['train', 'test'],
+    dfs_color: list[str] = ['lightblue', 'lightpink'],
+    use_dark_theme: bool = True,
+    use_compact_style: bool = True,
+    label_columns: list[str] | None = ['statistic'],
+    sig_digits: int | None = 3,
+    show_dtype_row: bool = False  # ← 追加
+):
+    """
+    複数の Polars DataFrame を比較しやすい表形式に整形して返す。
+    型情報行と視覚的なスタイルオプション付き。
+    """
+    from IPython.display import HTML
+    from great_tables import GT, style, loc, px
 
 
-    columns = _get_ordered_unique_columns(dfs)
-    charts = []
-    # for col in tqdm(df.columns):
-    pbar = tqdm(columns, desc="Start", leave=False)
-    for col in pbar:
-        pbar.set_description(f"Processing... (col: {col})")
-        chart = plot_histogram_line_overlay(
-            *dfs, col=col, col_target=col_target, num_n_bins=num_n_bins,
-            # df1, col=col, col_target=col_target, num_n_bins=num_n_bins,
-            str_col_bin_unique_limit=str_col_bin_unique_limit,
-            standardize_line=standardize_line, normalize_histogram=normalize_histogram, verbose=verbose)
-        if chart is not None:
-            charts.append(chart.properties(width=width_chart, height=height_chart))
-    # print(f"Processing... (alt.concat)")
-    for _ in tqdm(range(1), desc=f"Processing... (alt.concat(columns={columns_concat_chart}))", leave=False):
-        chart_all = alt.concat(*charts, columns=columns_concat_chart)
-    display(chart_all)
+    num_dfs = len(dfs)
+    assert num_dfs >= 1, "1つ以上のDataFrameが必要です"
 
-    dfs_describe = [df.describe_ex() for df in dfs]
-    table = tabulate_data_frames(*dfs_describe, dfs_color=tabulate_dfs_color)
-    display(table)
+    if dfs_name is None:
+        dfs_name = [f"df{i+1}" for i in range(num_dfs)]
+    if dfs_color is None:
+        dfs_color = ["lightgray"] * num_dfs
+
+    dfs_name = dfs_name[:num_dfs]
+    dfs_color = dfs_color[:num_dfs]
+    label_columns = label_columns or []
+
+    # ラベル列の処理
+    if label_columns:
+        for col in label_columns:
+            for df in dfs:
+                assert col in df.columns, f"{col} が全てのDataFrameに必要です"
+        label_df = dfs[0].select(label_columns)
+        dfs_raw = tuple(df.drop(label_columns) for df in dfs)
+    else:
+        label_df = None
+        dfs_raw = dfs
+
+    schema_info = [df.schema for df in dfs_raw]
+    label_schema = dfs[0].schema if label_columns else {}
+
+    # sig_digits の適用
+    if sig_digits is not None:
+        dfs = tuple(
+            df.with_columns([
+                pl.col(col).map_elements(lambda x: _format_sig(x, sig_digits), return_dtype=pl.String).alias(col)
+                for col in df.columns
+            ]) for df in dfs_raw
+        )
+    else:
+        dfs = dfs_raw
+
+    # カラム名に df名 を追加
+    dfs_named = []
+    column_to_color, column_to_df, column_to_full = {}, {}, {}
+
+    for i, (df, name, color) in enumerate(zip(dfs, dfs_name, dfs_color)):
+        renamed_cols = {}
+        for col in df.columns:
+            new_col = col if num_dfs == 1 else f"{col} ({name})"
+            renamed_cols[col] = new_col
+            column_to_color[new_col] = color
+            column_to_df.setdefault(col, []).append(i)
+            column_to_full.setdefault(col, []).append(new_col)
+        dfs_named.append(df.rename(renamed_cols))
+
+    df_combined = pl.concat(dfs_named, how="horizontal")
+
+    if label_df is not None:
+        df_combined = label_df.hstack(df_combined)
+        if num_dfs > 1:
+            df_combined = _reorder_columns_by_df_map(df_combined, label_columns, column_to_full, column_to_df)
+    else:
+        if num_dfs > 1:
+            df_combined = _reorder_columns_by_df_map(df_combined, [], column_to_full, column_to_df)
+
+    # 型情報の1行目を追加
+    if show_dtype_row:
+        dtype_row = {}
+        for schema, name in zip(schema_info, dfs_name):
+            for col in schema:
+                full_col = col if num_dfs == 1 else f"{col} ({name})"
+                dtype_row[full_col] = str(schema[col])
+        for col in label_columns:
+            dtype_row[col] = str(label_schema.get(col, ""))
+
+        dtype_row_filled = {col: dtype_row.get(col, "") for col in df_combined.columns}
+        df_combined = pl.concat([pl.DataFrame([dtype_row_filled]), df_combined], how="vertical")
+
+    # GreatTables スタイル適用
+    table = GT(df_combined)
+    if use_dark_theme:
+        table = table.tab_options(
+            table_background_color="#1e1e1e",
+            heading_background_color="#2e2e2e",
+            row_group_background_color="#2e2e2e",
+            table_border_top_color="#444444",
+            table_border_bottom_color="#444444"
+        )
+    if use_compact_style:
+        table = table.tab_options(
+            data_row_padding=px(2),
+            row_group_padding=px(2),
+            heading_title_font_size="small",
+            heading_subtitle_font_size="small",
+            table_font_size="small"
+        )
+        table = table.opt_vertical_padding(scale=0.5)
+        table = table.opt_horizontal_padding(scale=0.7)
+
+    for col in df_combined.columns:
+        if col in label_columns:
+            continue
+        color = column_to_color.get(col)
+        if color:
+            table = table.tab_style(style=style.text(color=color), locations=loc.body(columns=col))
+            table = table.tab_style(style=style.text(color=color), locations=loc.column_labels(columns=col))
+
+    if show_dtype_row:
+        table = table.tab_style(style=style.borders(sides="top", color="#888", style="solid", weight="2px"), locations=loc.body(rows=[0]))
+        table = table.tab_style(style=style.borders(sides="bottom", color="#888", style="solid", weight="2px"), locations=loc.body(rows=[0]))
+        table = table.tab_style(style=style.text(color="#bbb", weight="bold"), locations=loc.body(rows=[0]))
+
+    # return table
+    # 他と合わせるため左寄せにする
+    table_html = HTML(f"""
+        <div style="text-align: left; display: inline-block;">
+        {table._repr_html_()}
+        </div>
+        """)
+    return table_html
+
+
+def _reorder_columns_by_df_map(
+    df: pl.DataFrame,
+    label_columns: list[str],
+    column_to_full: dict[str, list[str]],
+    column_to_df: dict[str, list[int]]
+) -> pl.DataFrame:
+    """
+    各 base列（括弧の前）を、dfの順に揃えて交互に並べる。
+    label_columns はそのまま先頭に維持。
+
+    例：
+        df1: x, y   df2: x  → x (train), x (test), y (train)
+    """
+    base_order = [base for base in column_to_full if any(col in df.columns for col in column_to_full[base])]
+    ordered_cols = label_columns[:]
+    for base in base_order:
+        for idx in column_to_df[base]:
+            if idx < len(column_to_full[base]):
+                col = column_to_full[base][idx]
+                if col in df.columns:
+                    ordered_cols.append(col)
+    return df.select(ordered_cols)
+
 
 def _get_ordered_unique_columns(dfs: Sequence[pl.DataFrame]) -> list[str]:
     seen = set()
@@ -1244,40 +1576,6 @@ def _get_ordered_unique_columns(dfs: Sequence[pl.DataFrame]) -> list[str]:
                 seen.add(col)
                 ordered_cols.append(col)
     return ordered_cols
-
-
-"""
-☆compare_id関数
-"""
-def compare_id(
-    df_train: pl.DataFrame,
-    df_test: pl.DataFrame,
-    df_detail: pl.DataFrame,
-    col_compare: str,
-    subtitle_label_fontsize: int = 18,
-    category_label_fontsize: int = 16,
-    count_label_fontsize: int = 12,
-    width=600,
-    height=200,
-) -> alt.Chart:
-    col_label = 'DataFrame'
-
-    # 各DataFrameにDataFrame名を示す列を追加し、PIDとその列だけを選択
-    df_train_labeled = df_train.with_columns(pl.lit("train").alias(col_label)).select([col_compare, col_label])
-    df_test_labeled = df_test.with_columns(pl.lit("test").alias(col_label)).select([col_compare, col_label])
-    df_detail_labeled = df_detail.with_columns(pl.lit("detail").alias(col_label)).select([col_compare, col_label])
-
-    df_combined = pl.concat([df_train_labeled, df_test_labeled, df_detail_labeled], how="vertical")
-
-    venn_chart = plot_venn(
-        df=df_combined,
-        col_entity=col_compare,
-        col_category=col_label,
-        subtitle_label_fontsize = subtitle_label_fontsize,
-        category_label_fontsize = category_label_fontsize,
-        count_label_fontsize = count_label_fontsize,
-    ).properties(width=width, height=height)
-    return venn_chart
 
 
 """
