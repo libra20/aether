@@ -2,11 +2,16 @@ from IPython.display import display
 
 import polars as pl
 import altair as alt
+import matplotlib.pyplot as plt
 
 import types
 from typing import Sequence, Optional, Union
 
 from tqdm import tqdm
+
+
+alt.themes.enable('dark')
+plt.style.use('dark_background')
 
 
 """
@@ -762,9 +767,6 @@ def _standardize_columns_by_first_df(
 """
 ★plot_venn関数
 """
-import matplotlib.pyplot as plt
-
-
 def plot_venn(
     df: pl.DataFrame,
     col_entity: str,
@@ -871,10 +873,6 @@ def plot_venn(
     - `_draw_venn_matplotlib_dual()` と `_matplotlib_to_altair()` に依存しており、これらの補助関数が必要。
     - 最大3カテゴリまで対応（matplotlibのVenn制約による）。
     """
-    import matplotlib.pyplot as plt
-    plt.style.use('dark_background')
-
-
     if verbose:
         print(f"category_colors: {category_colors}")
 
