@@ -17,7 +17,7 @@ plt.style.use('dark_background')
 """
 ★read_csv_or_parquet関数 ※csvをparquetにしといて次から早く読む自作関数
 """
-def read_csv_or_parquet(csv_path: str) -> pl.DataFrame:
+def read_csv_or_parquet(csv_path: str, **kwargs) -> pl.DataFrame:
     """
     CSVまたは対応するParquetファイルを読み込み、PolarsのDataFrameを返す。
 
@@ -44,7 +44,7 @@ def read_csv_or_parquet(csv_path: str) -> pl.DataFrame:
     if os.path.exists(parquet_path):
         df = pl.read_parquet(parquet_path)
     else:
-        df = pl.read_csv(csv_path)
+        df = pl.read_csv(csv_path, **kwargs)
         df.write_parquet(parquet_path)
 
     return df
