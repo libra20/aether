@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  dev_cpu:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspaces:cached # mount (project root) => /workspaces/(project root)
+    tty: true
+    stdin_open: true
