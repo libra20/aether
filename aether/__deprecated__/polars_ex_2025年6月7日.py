@@ -1126,6 +1126,99 @@ def _matplotlib_to_altair(
 """
 ★profile関数
 """
+def profile_old(
+        *dfs,
+        col_target=None,
+        num_n_bins = 10,
+        width_chart = 200,
+        height_chart = 200,
+        columns_concat_chart = 2,
+        str_col_bin_unique_limit:int = 100,
+        standardize_line = True,
+        normalize_histogram = True,
+        tabulate_dfs_color: list[str] = ['lightblue', 'lightpink'],
+        verbose = False,
+        ):
+    """
+    複数のDataFrameを対象に、全列に対するプロファイリング可視化とサマリ表を表示する関数。
+
+    各列に対してヒストグラムまたは折れ線グラフを描画し、比較可能な形式で横並びに表示。
+    数値・カテゴリ・文字列などの型に応じて適切なビニングや標準化・正規化処理を行う。
+    また、各DataFrameに対する `describe_ex()` の結果を色分けして表形式で表示。
+
+    パラメータ
+    ----------
+    *dfs : DataFrame(s)
+        プロファイリング対象となる Polars データフレーム（複数可）。
+
+    col_target : str, optional
+        折れ線グラフとしてプロットする際のターゲット列（例：目的変数）。None の場合は省略。
+
+    num_n_bins : int, optional (default=10)
+        数値列のビン数。ビニングは `_draw_profile_graph()` 内部で自動処理される。
+
+    width_chart : int, optional
+        各チャートの横幅（ピクセル単位）。
+
+    height_chart : int, optional
+        各チャートの高さ（ピクセル単位）。
+
+    columns_concat_chart : int, optional
+        表示時に1行に並べるチャートの数（Altairの `alt.concat(..., columns=...)` に対応）。
+
+    str_col_bin_unique_limit : int, optional (default=100)
+        文字列・カテゴリ列で表示するユニーク値の最大数。超えるとスキップされる。
+
+    standardize_line : bool, optional (default=True)
+        折れ線グラフを標準化（平均0, 分散1）して比較するかどうか。
+
+    normalize_histogram : bool, optional (default=True)
+        ヒストグラムを正規化（相対頻度）するかどうか。
+
+    tabulate_dfs_color : list[str], optional
+        `describe_ex()` の出力に対して色を付けるためのリスト。DataFrameの順番に対応。
+
+    verbose : bool, optional
+        デバッグ出力を有効にする。
+
+    戻り値
+    -------
+    None
+        Altair チャートおよび HTML テーブルが notebook 上で `display()` によって表示される。
+
+    使用例
+    -------
+    >>> profile(df_train, df_test, col_target="target")
+
+    備考
+    ----
+    - チャートは Altair を使用しており、Jupyter Notebook / JupyterLab 上での可視化を想定。
+    - `_draw_profile_graph()` や `_draw_profile_table()` などの補助関数に依存。
+    - `describe_ex()` を使って拡張サマリを生成しており、型や欠損、最頻値なども表で確認可能。
+    """
+    columns = _get_ordered_unique_columns(dfs)
+    charts = []
+    # for col in tqdm(df.columns):
+    pbar = tqdm(columns, desc="Start", leave=False)
+    for col in pbar:
+        pbar.set_description(f"Processing... (col: {col})")
+        chart = _draw_profile_graph(
+            *dfs, col=col, col_target=col_target, num_n_bins=num_n_bins,
+            # df1, col=col, col_target=col_target, num_n_bins=num_n_bins,
+            str_col_bin_unique_limit=str_col_bin_unique_limit,
+            standardize_line=standardize_line, normalize_histogram=normalize_histogram, verbose=verbose)
+        if chart is not None:
+            charts.append(chart.properties(width=width_chart, height=height_chart))
+    # print(f"Processing... (alt.concat)")
+    for _ in tqdm(range(1), desc=f"Processing... (alt.concat(columns={columns_concat_chart}))", leave=False):
+        chart_all = alt.concat(*charts, columns=columns_concat_chart)
+    display(chart_all)
+
+    dfs_describe = [df.describe_ex() for df in dfs]
+    table = _draw_profile_table(*dfs_describe, dfs_color=tabulate_dfs_color)
+    display(table)
+
+
 def profile(
         *dfs,
         col_target=None,
