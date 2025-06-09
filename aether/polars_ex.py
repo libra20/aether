@@ -1130,14 +1130,15 @@ def profile(
         *dfs,
         col_target=None,
         num_n_bins=10,
-        width_chart=200,
-        height_chart=200,
+        width_chart=300,
+        height_chart=250,
         str_col_bin_unique_limit: int = 100,
         standardize_line=True,
         normalize_histogram=True,
         tabulate_dfs_color: list[str] = ['lightblue', 'lightpink'],
         verbose=False,
-        width_panel: int = 350,
+        width_panel_table: int = 300,
+        width_panel_chart: int = 500,
         table_compact_fn=None,
         render_panel_fn=None,
     ):
@@ -1219,11 +1220,28 @@ def profile(
             chart_img_html = f'<img src="data:image/png;base64,{chart_base64}" style="max-width: 100%; margin-top: 10px;">'
 
             html = f"""
+            <style>
+                /* 表の1列目だけ：折り返しなし、幅も固定 */
+                td:first-child {{
+                    white-space: nowrap;
+                    word-break: keep-all;
+                }}
+            </style>
+
             <div style="display: flex; justify-content: flex-start; gap: 20px; margin-bottom: 0px; align-items: flex-start;">
-                <div style="min-width: {width_panel}px; max-width: 500px; overflow-x: auto;">
+                <div style="
+                    min-width: {width_panel_table}px;
+                    max-width: {width_panel_table}px;
+                    word-break: break-word;
+                    white-space: normal;
+                ">
                     {gt._repr_html_()}
                 </div>
-                <div style="width: {width_panel}px; text-align: left;">
+                <div style="
+                    width: {width_panel_chart}px;
+                    max-width: {width_panel_chart}px;
+                    text-align: left;
+                ">
                     {chart_img_html}
                 </div>
             </div>
@@ -1237,7 +1255,12 @@ def profile(
     for i, col in enumerate(columns, 1):
         # pbar.set_description(f"Processing... (col: {col})")
         # display(Markdown(f"### 📊 [{i}/{len(columns)}] {col}"))
-        icon = _get_dtype_icon(dfs[0], col)
+        # icon = _get_dtype_icon(dfs[0], col)
+        # col を持っている最初の df を取得（なければ None）
+        df_has_col = next((df for df in dfs if col in df.columns), None)
+        # あればアイコン取得、なければ fallback
+        icon = _get_dtype_icon(df_has_col, col)
+
         display(Markdown(f"### {icon} `{col}` _(Column {i} of {len(columns)})_"))
 
         # チャート作成
@@ -1248,6 +1271,12 @@ def profile(
             normalize_histogram=normalize_histogram,
             verbose=verbose
         )
+        dtype = df_has_col.schema[col]
+        if dtype == pl.Utf8:
+            chart = chart.configure_axisX(
+                # labelFontSize=13,
+                labelAngle=-45  # ← 例：-45度で斜めに表示（好みに応じて調整）
+            )
 
         if chart is None:
             continue
