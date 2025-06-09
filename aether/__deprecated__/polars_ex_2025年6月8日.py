@@ -787,230 +787,6 @@ def _standardize_columns_by_first_df(
 
 
 """
-★plot_histogram_with_line_chart関数
-"""
-def plot_histogram_with_line_chart(
-    *dfs:pl.DataFrame,
-    col:str,
-    col_target: Optional[Union[str, list[str]]] = None,
-    dfs_name:list[str] = ['train', 'test'],
-    dfs_color_histogram:list[str] = ['royalblue', 'indianred'],
-    dfs_color_line:list[str] = ['blues', 'reds'],
-    col_dataframe_name = 'DataFrame',
-    col_target_unpivot_name: str = 'column',
-    col_target_unpivot_value: str = 'target',
-    normalize_histogram:bool = True,
-    standardize_line:bool = True,
-    num_n_bins: int = 10,
-    dt_truncate_unit: str = "1mo",
-    verbose:bool=False,
-):
-    """
-    指定された1つの列（`col`）について、複数のDataFrameにまたがって
-    Altairでヒストグラム＋折れ線グラフを描画する。
-
-    数値型や日付型の列に対してビン分割を行い、
-    - ヒストグラム: 各DataFrameの出現数を棒グラフで表示
-    - 折れ線グラフ: 指定された数値列（`col_target`）の平均値をビンごとに表示
-
-    Parameters
-    ----------
-    dfs : pl.DataFrame
-        分析対象の複数のDataFrame（例：trainとtest）
-    col : str
-        ビン分割・ヒストグラム対象の列
-    col_target : str or list of str, optional
-        折れ線グラフに表示する数値列（複数可）。Noneなら折れ線なし。
-    dfs_name : list of str
-        各DataFrameの名前（凡例や色付けに使用）
-    dfs_color_histogram : list of str
-        各DataFrameのヒストグラムの色
-    dfs_color_line : list of str
-        各DataFrameの折れ線グラフのカラースキーム名（例："blues", "reds"）
-    col_dataframe_name : str
-        各DataFrameの識別に使う列名（例："DataFrame"）
-    col_target_unpivot_name : str
-        折れ線グラフ用のunpivot後のカテゴリ列名
-    col_target_unpivot_value : str
-        折れ線グラフ用のunpivot後の値列名
-    normalize_histogram : bool
-        ヒストグラムを正規化して描画するか（Trueで相対頻度）
-    standardize_line : bool
-        折れ線グラフを1つ目のdfを基準に標準化するか
-    num_n_bins : int
-        ヒストグラムのビン数
-    dt_truncate_unit : str
-        日付列の切り捨て単位（例："1mo" で月単位）
-    verbose : bool
-        処理ログの表示
-
-    Returns
-    -------
-    alt.Chart or None
-        Altairの重ね合わせチャート（ヒストグラム＋折れ線）、
-        もしくは対象データがなければ None。
-    """
-    assert len(dfs_name) >= len(dfs), f"dfs_nameの要素数が足りません (必要数: {len(dfs)})"
-    assert len(dfs_color_histogram) >= len(dfs), f"dfs_color_histogramの要素数が足りません (必要数: {len(dfs)})"
-    assert len(dfs_color_line) >= len(dfs), f"dfs_color_lineの要素数が足りません (必要数: {len(dfs)})"
-
-    # col を持っている最初の df を取得（なければ None）
-    df_has_col = next((df for df in dfs if col in df.columns), None)
-    if df_has_col is None:
-        if verbose:
-            print(f"列: {col} を含むデータフレームがありません")
-        return None
-    dtype = df_has_col.schema[col]
-
-    # dfsが単品かつdfsがメンテされてなさそうな場合、DataFrameの名前を消す
-    if len(dfs) == 1 and len(dfs_name) > 1:
-        dfs_name = [None] 
-
-    # col_targetはstr, list[str]どっちでもいけるようにする(内部ではlistで統一)
-    # col_target_list = [col_target] if isinstance(col_target, str) else col_target
-    if col_target is None:
-        col_target_list = []
-    elif isinstance(col_target, str):
-        col_target_list = [col_target]
-    else:
-        col_target_list = col_target
-
-    # 列名: DataFrame, 値: train, testみたいな列を追加する(色分け用)
-    dfs = [
-        df.with_columns(pl.lit(name).alias(col_dataframe_name))
-        for df, name in zip(dfs, dfs_name)
-    ]
-    if not dfs:
-        if verbose:
-            print(f"列: {col} を含むデータフレームがありません")
-        return None
-    
-    # 列を揃える(ない場合は値がすべてNullの列となる)
-    dfs_aligned = _align_all_columns(*dfs)
-
-    # bin列を作る(未結合)
-    *dfs_bin, df_bin_detail_info = get_bin_column(
-        *dfs_aligned, col=col, 
-        num_n_bins=num_n_bins, dt_truncate_unit=dt_truncate_unit, verbose=False
-    )
-    col_bin = dfs_bin[0].to_series().name
-
-    # # bin列を結合する
-    if col_bin != col:
-        dfs_with_bin = [
-            df_aligned.hstack(df_bin)
-            for df_aligned, df_bin in zip(dfs_aligned, dfs_bin)
-        ]
-    else:
-        dfs_with_bin = dfs_aligned
-
-    # 標準化する(オプション)
-    if standardize_line and col_target_list:
-        dfs_with_bin = _standardize_columns_by_first_df(
-            *dfs_with_bin, col_list=col_target_list
-        )
-
-    # チャート描画用サブ関数(ループ内で使うから関数化)
-    def create_histogram_chart(df_with_bin: pl.DataFrame):
-        # color_scale_bar = alt.Scale(domain=['train', 'test'], range=['royalblue', 'indianred'])
-        color_scale_bar = alt.Scale(domain=dfs_name, range=dfs_color_histogram)
-
-        chart_histogram = plot_histogram(
-            df_with_bin,
-            col_bin=col_bin,
-            col_color=col_dataframe_name,
-            df_bin_detail_info=df_bin_detail_info,
-            normalize_histogram=normalize_histogram,
-            verbose=False
-        )
-        is_all_name_missing = df_with_bin.select(pl.col(col_dataframe_name).is_null().all()).item()
-        if is_all_name_missing:
-            legend = None
-        else:
-            legend = alt.Legend(title=f'{col_dataframe_name}')
-        chart_histogram = chart_histogram.encode(
-            color=alt.Color(
-                f"{col_dataframe_name}:N",
-                scale=color_scale_bar,
-                legend=legend
-            )
-        )
-        return chart_histogram#, train_or_test
-
-    # チャート描画用サブ関数2(ループ内で使うから関数化)
-    name_to_color_line = dict(zip(dfs_name, dfs_color_line))
-    def create_line_point_chart(df_with_bin: pl.DataFrame):
-        dataframe_name = df_with_bin.select(col_dataframe_name).unique().item()
-        # color_scale_scheme_line = 'blues' if dataframe_name == 'train' else 'reds'
-        color_scale_scheme_line = name_to_color_line[dataframe_name]
-
-        # target列が複数でもいけるように、unpivot(melt)してロングフォーマットに直す
-        df_unpivot_target = df_with_bin.unpivot(
-            on=col_target_list,
-            index=col_bin,
-            variable_name=col_target_unpivot_name,
-            value_name=col_target_unpivot_value
-        )
-
-        chart_line_point = plot_line_point_over_bin(
-            df_unpivot_target,
-            col_bin=col_bin,
-            col_target=col_target_unpivot_value,
-            col_color=col_target_unpivot_name,
-            df_bin_detail_info=df_bin_detail_info,
-            color_scale_scheme=color_scale_scheme_line,
-            verbose=False
-        )
-
-        # 折れ線グラフが1つもない場合、折れ線用のレジェンドタイトル(凡例のグループ名)を表示しない
-        is_all_target_missing = df_unpivot_target.select(pl.col(col_target_unpivot_value).is_null().all()).item()
-        if is_all_target_missing:
-            legend = None
-        else:
-            legend = alt.Legend(title=f"target{f' ({dataframe_name})' if dataframe_name else ''}")
-
-        chart_line_point = chart_line_point.encode(
-            color=alt.Color(legend=legend)
-        )
-        return chart_line_point
-
-    # ループで描画
-    chart_histogram_list = []
-    chart_line_point_list = []
-
-    for df_with_bin in dfs_with_bin:
-        is_all_histogram_bin_missing = df_with_bin.select(pl.col(col_bin).is_null().all()).item()
-        if is_all_histogram_bin_missing:
-            continue
-
-        chart_histogram = create_histogram_chart(df_with_bin)
-        chart_histogram_list.append(chart_histogram)
-
-        if col_target_list:
-            chart_line_point = create_line_point_chart(df_with_bin)
-            chart_line_point_list.append(chart_line_point)
-
-    # まとめる
-    chart_histogram = alt.layer(*chart_histogram_list)
-
-    if col_target_list:
-        chart_line_point = alt.layer(*chart_line_point_list)
-        chart = alt.layer(chart_histogram, chart_line_point).resolve_scale(
-            y='independent', color='independent', shape='independent'
-        )
-    else:
-        chart = chart_histogram
-
-    if dtype == pl.Utf8:
-        chart = chart.configure_axisX(
-            # labelFontSize=12,
-            labelAngle=-45  # -45度で斜めに表示
-        )
-
-    return chart
-
-
-"""
 ★plot_venn関数
 """
 def plot_venn(
@@ -1495,6 +1271,12 @@ def profile(
             normalize_histogram=normalize_histogram,
             verbose=verbose
         )
+        dtype = df_has_col.schema[col]
+        if dtype == pl.Utf8:
+            chart = chart.configure_axisX(
+                # labelFontSize=13,
+                labelAngle=-45  # ← 例：-45度で斜めに表示（好みに応じて調整）
+            )
 
         if chart is None:
             continue
@@ -1534,112 +1316,211 @@ def _get_dtype_icon(df: pl.DataFrame, col: str) -> str:
 
 
 def _draw_profile_graph(
-    *dfs: pl.DataFrame,
-    col: str,
-    col_target: Optional[Union[str, list[str]]] = None,
-    dfs_name: list[str] = ['train', 'test'],
-    dfs_color_histogram: list[str] = ['royalblue', 'indianred'],
-    dfs_color_line: list[str] = ['blues', 'reds'],
-    col_dataframe_name: str = 'DataFrame',
-    normalize_histogram: bool = True,
-    standardize_line: bool = True,
+    *dfs:pl.DataFrame,
+    col:str,
+    col_target: Optional[Union[str, list[str]]] = None, # Union[str, list[str]],
+    dfs_name:list[str] = ['train', 'test'],
+    dfs_color_histogram:list[str] = ['royalblue', 'indianred'],
+    dfs_color_line:list[str] = ['blues', 'reds'],
+    col_dataframe_name = 'DataFrame',
+    col_target_unpivot_name: str = 'column',
+    col_target_unpivot_value: str = 'target',
+    normalize_histogram:bool = True,
+    standardize_line:bool = True,
     num_n_bins: int = 10,
     dt_truncate_unit: str = "1mo",
-    str_col_bin_unique_limit: int = 100,
-    verbose: bool = False,
+    str_col_bin_unique_limit:int = 100,
+    verbose:bool=False,
 ):
     """
-    対象の列 `col` に対して、ヒストグラム＋折れ線グラフ または ベン図 を描画する。
-
-    Parameters
-    ----------
-    dfs : pl.DataFrame
-        分析対象のDataFrame群（train/testなど）
-    col : str
-        描画対象列
-    col_target : str or list[str], optional
-        折れ線グラフ対象の数値列（複数可）
-    dfs_name : list[str]
-        各DataFrameの識別名（凡例や色付けに使用）
-    dfs_color_histogram : list[str]
-        各DataFrameに対応するヒストグラムバーの色
-    dfs_color_line : list[str]
-        各DataFrameに対応する折れ線グラフのカラースキーム
-    col_dataframe_name : str
-        凡例などに使う「DataFrame種別」列の名前
-    normalize_histogram : bool
-        ヒストグラムを正規化するかどうか
-    standardize_line : bool
-        折れ線グラフ用に標準化を行うかどうか
-    num_n_bins : int
-        ヒストグラムのビン数
-    dt_truncate_unit : str
-        日付型列の切り捨て単位（例："1mo"）
-    str_col_bin_unique_limit : int
-        ベン図に切り替えるカテゴリ数の上限
-    verbose : bool
-        デバッグ表示
+    - profile関数(グラフ＋表を全列分表示)のグラフ描画処理
+    - plot_histogram, plot_line_point_over_bin, plot_venn関数などを使う
     """
-    # 基本チェック
+    from typing import Union, Optional
+
+
     assert len(dfs_name) >= len(dfs), f"dfs_nameの要素数が足りません (必要数: {len(dfs)})"
     assert len(dfs_color_histogram) >= len(dfs), f"dfs_color_histogramの要素数が足りません (必要数: {len(dfs)})"
     assert len(dfs_color_line) >= len(dfs), f"dfs_color_lineの要素数が足りません (必要数: {len(dfs)})"
 
-    # DataFrameに名前列を追加
+    # dfsが単品かつdfsがメンテされてなさそうな場合、DataFrameの名前を消す
+    if len(dfs) == 1 and len(dfs_name) > 1:
+        dfs_name = [None] 
+
+    # col_targetはstr, list[str]どっちでもいけるようにする(内部ではlistで統一)
+    # col_target_list = [col_target] if isinstance(col_target, str) else col_target
+    if col_target is None:
+        col_target_list = []
+    elif isinstance(col_target, str):
+        col_target_list = [col_target]
+    else:
+        col_target_list = col_target
+
+    # 列名: DataFrame, 値: train, testみたいな列を追加する(色分け用)
     dfs = [
         df.with_columns(pl.lit(name).alias(col_dataframe_name))
         for df, name in zip(dfs, dfs_name)
     ]
 
-    # col を持っている最初の df を取得（なければ None）
-    df_has_col = next((df for df in dfs if col in df.columns), None)
+    # 列を揃える(ない場合は値がすべてNullの列となる)
+    dfs_aligned = _align_all_columns(*dfs)
 
-    if df_has_col is None:
+    # bin列を作る(未結合)
+    *dfs_bin, df_bin_detail_info = get_bin_column(
+        *dfs_aligned, col=col, 
+        num_n_bins=num_n_bins, dt_truncate_unit=dt_truncate_unit, verbose=False
+    )
+    col_bin = dfs_bin[0].to_series().name
+
+    # ↓これは呼び出す側にもっていくかも★
+
+    # カテゴリ列のクラスが制限以上なら描画しない(そのbin列はすべてNullとする→描画されない)
+    # ユニーク数を確認
+    n_uniques = [
+        df_bin.select(pl.col(col_bin).n_unique()).item()
+        for df_bin in dfs_bin
+    ]
+    # bin数の最大値を取る
+    n_unique_max = max(n_uniques)
+    # チェックNGフラグ
+    col_bin_check_ng = n_unique_max > str_col_bin_unique_limit
+
+
+    # NG(クラス数多すぎ)ならスキップ ⇒ ベン図
+    if col_bin_check_ng:
+        # print(f"列: {col} のbin数が多すぎるためスキップします (bin数: {n_unique_max}, 上限: {str_col_bin_unique_limit})")
+        # return None
         if verbose:
-            print(f"列: {col} を含むデータフレームがありません")
-        return None
-
-    # ベン図にするかの判定（文字列型かつユニーク数が多すぎる）
-    dtype = df_has_col.schema[col]
-    is_str_col = dtype == pl.Utf8
-
-    use_venn = False
-    if is_str_col:
-        n_unique = df_has_col.select(pl.col(col).n_unique()).item()
-        use_venn = n_unique > str_col_bin_unique_limit
-        if verbose:
-            print(f"列: {col} のカテゴリ数: {n_unique}（上限: {str_col_bin_unique_limit}） → {'ベン図' if use_venn else '通常グラフ'}")
-
-    if use_venn:
-        df_combined = pl.concat(
-            [df.select([col, col_dataframe_name]) for df in dfs if col in df.columns],
-            how="vertical"
-        )
+            print(f"列: {col} のbin数が多すぎるためベン図を描画します (bin数: {n_unique_max}, 上限: {str_col_bin_unique_limit})")
+        
+        # 結合してplot_vennに渡す
+        dfs_labeled = [
+            df.select([col, col_dataframe_name])
+            for df in dfs
+        ]
+        df_combined = pl.concat(dfs_labeled, how="vertical")
         category_colors = dict(zip(dfs_name, dfs_color_histogram))
-        return plot_venn(
+        venn_chart = plot_venn(
             df=df_combined,
             col_entity=col,
             col_category=col_dataframe_name,
+            # width=width,
+            # height=height,
             category_colors=category_colors,
             title=f"{col}",
             verbose=verbose,
         )
+        return venn_chart
 
-    # 通常のヒストグラム＋折れ線グラフ描画へ
-    return plot_histogram_with_line_chart(
-        *dfs,
-        col=col,
-        col_target=col_target,
-        dfs_name=dfs_name,
-        dfs_color_histogram=dfs_color_histogram,
-        dfs_color_line=dfs_color_line,
-        col_dataframe_name=col_dataframe_name,
-        normalize_histogram=normalize_histogram,
-        standardize_line=standardize_line,
-        num_n_bins=num_n_bins,
-        dt_truncate_unit=dt_truncate_unit,
-        verbose=verbose,
-    )
+
+    # # bin列を結合する
+    if col_bin != col:
+        dfs_with_bin = [
+            df_aligned.hstack(df_bin)
+            for df_aligned, df_bin in zip(dfs_aligned, dfs_bin)
+        ]
+    else:
+        dfs_with_bin = dfs_aligned
+
+    # 標準化する(オプション)
+    if standardize_line and col_target_list:
+        dfs_with_bin = _standardize_columns_by_first_df(
+            *dfs_with_bin, col_list=col_target_list
+        )
+
+    # ---- サブ関数（ループの前に置く） ----
+    # domain = dfs_name
+    # range = dfs_color_histogram
+    def create_histogram_chart(df_with_bin: pl.DataFrame):
+        # color_scale_bar = alt.Scale(domain=['train', 'test'], range=['royalblue', 'indianred'])
+        color_scale_bar = alt.Scale(domain=dfs_name, range=dfs_color_histogram)
+
+        chart_histogram = plot_histogram(
+            df_with_bin,
+            col_bin=col_bin,
+            col_color=col_dataframe_name,
+            df_bin_detail_info=df_bin_detail_info,
+            normalize_histogram=normalize_histogram,
+            verbose=False
+        )
+        is_all_name_missing = df_with_bin.select(pl.col(col_dataframe_name).is_null().all()).item()
+        if is_all_name_missing:
+            legend = None
+        else:
+            legend = alt.Legend(title=f'{col_dataframe_name}')
+        chart_histogram = chart_histogram.encode(
+            color=alt.Color(
+                f"{col_dataframe_name}:N",
+                scale=color_scale_bar,
+                legend=legend
+            )
+        )
+        return chart_histogram#, train_or_test
+
+    name_to_color_line = dict(zip(dfs_name, dfs_color_line))
+    def create_line_point_chart(df_with_bin: pl.DataFrame):
+        dataframe_name = df_with_bin.select(col_dataframe_name).unique().item()
+        # color_scale_scheme_line = 'blues' if dataframe_name == 'train' else 'reds'
+        color_scale_scheme_line = name_to_color_line[dataframe_name]
+
+        # target列が複数でもいけるように、unpivot(melt)してロングフォーマットに直す
+        df_unpivot_target = df_with_bin.unpivot(
+            on=col_target_list,
+            index=col_bin,
+            variable_name=col_target_unpivot_name,
+            value_name=col_target_unpivot_value
+        )
+
+        chart_line_point = plot_line_point_over_bin(
+            df_unpivot_target,
+            col_bin=col_bin,
+            col_target=col_target_unpivot_value,
+            col_color=col_target_unpivot_name,
+            df_bin_detail_info=df_bin_detail_info,
+            color_scale_scheme=color_scale_scheme_line,
+            verbose=False
+        )
+
+        # 折れ線グラフが1つもない場合、折れ線用のレジェンドタイトル(凡例のグループ名)を表示しない
+        is_all_target_missing = df_unpivot_target.select(pl.col(col_target_unpivot_value).is_null().all()).item()
+        if is_all_target_missing:
+            legend = None
+        else:
+            legend = alt.Legend(title=f"target{f' ({dataframe_name})' if dataframe_name else ''}")
+
+        chart_line_point = chart_line_point.encode(
+            color=alt.Color(legend=legend)
+        )
+        return chart_line_point
+
+    # ---- ここからループ本体 ----
+    chart_histogram_list = []
+    chart_line_point_list = []
+
+    for df_with_bin in dfs_with_bin:
+        is_all_histogram_bin_missing = df_with_bin.select(pl.col(col_bin).is_null().all()).item()
+        if is_all_histogram_bin_missing:
+            continue
+
+        chart_histogram = create_histogram_chart(df_with_bin)
+        chart_histogram_list.append(chart_histogram)
+
+        if col_target_list:
+            chart_line_point = create_line_point_chart(df_with_bin)
+            chart_line_point_list.append(chart_line_point)
+
+    # ---- 最後にまとめる ----
+    chart_histogram = alt.layer(*chart_histogram_list)
+
+    if col_target_list:
+        chart_line_point = alt.layer(*chart_line_point_list)
+        chart = alt.layer(chart_histogram, chart_line_point).resolve_scale(
+            y='independent', color='independent', shape='independent'
+        )
+    else:
+        chart = chart_histogram
+
+    return chart
 
 
 def _draw_profile_table(
