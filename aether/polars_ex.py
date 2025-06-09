@@ -1142,9 +1142,62 @@ def profile(
         render_panel_fn=None,
     ):
     """
-    各列に対して、Altairチャート＋great_tables表を横並びに表示するプロファイリング関数。
+    複数のDataFrameを対象に、全列に対するプロファイリング可視化とサマリ表を表示する関数。
+    各列に対して、Altairチャート＋great_tables表を横並びに表示する。
 
-    その他の引数は元のprofile()と同様。
+    各列に対してヒストグラムまたは折れ線グラフを描画し、比較可能な形式で表示。
+    数値・カテゴリ・文字列などの型に応じて適切なビニングや標準化・正規化処理を行う。
+    また、各DataFrameに対する `describe_ex()` の結果を色分けして表形式で表示。
+
+    パラメータ
+    ----------
+    *dfs : DataFrame(s)
+        プロファイリング対象となる Polars データフレーム（複数可）。
+
+    col_target : str, optional
+        折れ線グラフとしてプロットする際のターゲット列（例：目的変数）。None の場合は省略。
+
+    num_n_bins : int, optional (default=10)
+        数値列のビン数。ビニングは `_draw_profile_graph()` 内部で自動処理される。
+
+    width_chart : int, optional
+        各チャートの横幅（ピクセル単位）。
+
+    height_chart : int, optional
+        各チャートの高さ（ピクセル単位）。
+
+    columns_concat_chart : int, optional
+        表示時に1行に並べるチャートの数（Altairの `alt.concat(..., columns=...)` に対応）。
+
+    str_col_bin_unique_limit : int, optional (default=100)
+        文字列・カテゴリ列で表示するユニーク値の最大数。超えるとスキップされる。
+
+    standardize_line : bool, optional (default=True)
+        折れ線グラフを標準化（平均0, 分散1）して比較するかどうか。
+
+    normalize_histogram : bool, optional (default=True)
+        ヒストグラムを正規化（相対頻度）するかどうか。
+
+    tabulate_dfs_color : list[str], optional
+        `describe_ex()` の出力に対して色を付けるためのリスト。DataFrameの順番に対応。
+
+    verbose : bool, optional
+        デバッグ出力を有効にする。
+
+    戻り値
+    -------
+    None
+        Altair チャートおよび HTML テーブルが notebook 上で `display()` によって表示される。
+
+    使用例
+    -------
+    >>> profile(df_train, df_test, col_target="target")
+
+    備考
+    ----
+    - チャートは Altair を使用しており、Jupyter Notebook / JupyterLab 上での可視化を想定。
+    - `_draw_profile_graph()` や `_draw_profile_table()` などの補助関数に依存。
+    - `describe_ex()` を使って拡張サマリを生成しており、型や欠損、最頻値なども表で確認可能。
     """
     from IPython.display import display
     from tqdm import tqdm
@@ -1162,20 +1215,11 @@ def profile(
             chart.save(fp=buf, format="png")
             buf.seek(0)
             chart_base64 = base64.b64encode(buf.read()).decode("utf-8")
-            chart_img_html = f'<img src="data:image/png;base64,{chart_base64}" style="max-width:100%;">'
+            # GTの上部マージンに合わせて少しマージンを取る
+            chart_img_html = f'<img src="data:image/png;base64,{chart_base64}" style="max-width: 100%; margin-top: 10px;">'
 
-            # html = f"""
-            # <div style="display: flex; justify-content: flex-start; gap: 20px; margin-bottom: 40px;">
-            #     <div style="width: {width_panel}px; text-align: left;">
-            #         {gt._repr_html_()}
-            #     </div>
-            #     <div style="width: {width_panel}px; text-align: left;">
-            #         {chart_img_html}
-            #     </div>
-            # </div>
-            # """
             html = f"""
-            <div style="display: flex; justify-content: flex-start; gap: 20px; margin-bottom: 40px; align-items: flex-start;">
+            <div style="display: flex; justify-content: flex-start; gap: 20px; margin-bottom: 0px; align-items: flex-start;">
                 <div style="min-width: {width_panel}px; max-width: 500px; overflow-x: auto;">
                     {gt._repr_html_()}
                 </div>
@@ -1192,10 +1236,6 @@ def profile(
     # for col in pbar:
     for i, col in enumerate(columns, 1):
         # pbar.set_description(f"Processing... (col: {col})")
-        # pbar.update(1)
-        # 進捗バー（使い捨て）
-
-        # display(Markdown(f"### 📊 {col}"))
         # display(Markdown(f"### 📊 [{i}/{len(columns)}] {col}"))
         icon = _get_dtype_icon(dfs[0], col)
         display(Markdown(f"### {icon} `{col}` _(Column {i} of {len(columns)})_"))
