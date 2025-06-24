@@ -3,15 +3,174 @@ from IPython.display import display, Markdown
 import polars as pl
 import altair as alt
 import matplotlib.pyplot as plt
-
-import types
-from typing import Sequence, Optional, Union
-
 from tqdm import tqdm
+
+import os
+import json
+import hashlib
+import functools
+import inspect
+import ast
+import datetime
+from pathlib import Path
+import joblib
+import types
+from typing import Sequence, Optional, Union, Callable
 
 
 alt.themes.enable('dark')
 plt.style.use('dark_background')
+
+
+"""
+★cache_polarsデコレータ
+"""
+# --- 設定 ---
+CACHE_ENABLED = os.getenv("POLARS_CACHE_ENABLED", "1") != "0"
+CACHE_DIR = Path(os.getenv("POLARS_CACHE_DIR", "./cache"))
+CACHE_DIR.mkdir(exist_ok=True)
+
+# --- メインデコレータ ---
+def cache_polars(func: Callable):
+    """
+    関数の戻り値をキャッシュとしてローカルに保存するデコレータ。
+    自分用のため汎用性は追及しておらず、PolarsのDataFrame操作を行う関数に付けることを想定している。
+
+    - 関数のソースコード、引数（Polars DataFrame含む）に基づいてキャッシュキーを生成
+      - キャッシュを有効に使うために、引数は変更されにくいもの、戻り値は最小限にするのを推奨(コード例参照)
+    - 実行結果は `joblib` で pickle保存され、次回同一キーでの呼び出し時に再利用される
+    - Polars DataFrameの引数は全列情報とhead/tailのCSVダイジェストを用いてハッシュ化
+    - 既存キャッシュは同じ関数名の古いものから1件だけ保持（保存時に削除）
+
+    環境変数：
+    - `POLARS_CACHE_DIR`: キャッシュ保存先ディレクトリ（デフォルト: "./cache"）
+    - `POLARS_CACHE_ENABLED`: "0" を指定するとキャッシュを無効化
+
+    例:
+        ```python
+        @cache_polars
+        def get_col_holiday(*dfs:pl.DataFrame) -> Iterator[pl.DataFrame]:
+            df_holiday = _get_df_holiday()
+            for df in dfs:
+                df_new = (
+                    df.with_columns(pl.col("time").dt.date().alias("date"))
+                    .join(df_holiday, on="date", how="left")
+                    .select(
+                        pl.col('holiday_name'),
+                        pl.col("is_holiday").fill_null(0).cast(pl.Int8),
+                    )
+                )
+                yield df_new
+
+        df_new, df_test_new = get_col_holiday(df_original, df_test_original)
+        df, df_test = df.with_columns(df_new), df_test.with_columns(df_test_new)
+        ```
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # --- ハッシュキー作成 ---
+        key_hash = _make_cache_key(func, args, kwargs)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        prefix = func.__name__
+        base_filename = f"{prefix}_{ts}_{key_hash}"
+
+        # --- キャッシュファイル検索（ts無視） ---
+        matched_files = list(CACHE_DIR.glob(f"{prefix}_*_{key_hash}.pkl"))
+        if CACHE_ENABLED and matched_files:
+            path = max(matched_files, key=os.path.getmtime)
+            print(f"[Cache HIT] {path}")
+            return _load_result(path)
+
+        # --- 実行・保存 ---
+        result = func(*args, **kwargs)
+        # yield対応(Iteratorではなくtupleにまとめてから)
+        if isinstance(result, types.GeneratorType):
+            result = tuple(result)
+        _save_result(base_filename, result)
+        return result
+
+    return wrapper
+
+# --- 結果保存（古いファイル削除 + エラー時raise） ---
+def _save_result(base_filename: str, result):
+    # generator → tuple に変換（joblibはgenerator保存不可）
+    if (
+        hasattr(result, '__iter__') 
+        and not isinstance(result, (str, bytes, dict, list, tuple, pl.DataFrame))
+    ):
+        result = tuple(result)  # ここで generator 消費してタプル化
+
+    # unpackできるように最低限のチェック
+    if result is None:
+        raise ValueError("[Cache SAVE ERROR] function returned None, cannot cache")
+
+    path = CACHE_DIR / f"{base_filename}.pkl"
+
+    # 古い同一キーのファイルを削除
+    prefix, key_hash = base_filename.split("_", 1)
+    for old_path in CACHE_DIR.glob(f"{prefix}_*_{key_hash}.pkl"):
+        if old_path.exists():
+            try:
+                old_path.unlink()
+                print(f"[Cache DELETED] {old_path}")
+            except Exception as e:
+                print(f"[Cache DELETE FAILED] {old_path}: {e}")
+
+    # 新しいファイルを保存
+    try:
+        joblib.dump(result, path)
+        print(f"[Cache SAVED] {path}")
+    except Exception as e:
+        print(f"[Cache SAVE FAILED] {path}: {e}")
+        raise
+
+# --- 結果読み込み ---
+def _load_result(path: Path):
+    try:
+        return joblib.load(path)
+    except Exception as e:
+        print(f"[Cache LOAD FAILED] {path}: {e}")
+        raise
+
+# --- ソースコードの正規化 ---
+def _get_clean_source(func) -> str:
+    try:
+        source = inspect.getsource(func)
+        parsed = ast.parse(source)
+        return ast.unparse(parsed)
+    except Exception:
+        return "unavailable"
+
+# --- ハッシュキー作成 ---
+def _make_cache_key(func, args, kwargs) -> str:
+    src = _get_clean_source(func)
+    ser_args = _serialize(args)
+    ser_kwargs = _serialize(kwargs)
+    content = json.dumps({"source": src, "args": ser_args, "kwargs": ser_kwargs}, sort_keys=True)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+# --- 引数のシリアライズ ---
+def _serialize(obj):
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    elif isinstance(obj, (list, tuple)):
+        return [_serialize(x) for x in obj]
+    elif isinstance(obj, dict):
+        return {str(k): _serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, pl.DataFrame):
+        return {
+            "shape": obj.shape,
+            "columns": obj.columns,
+            "dtypes": [str(dt) for dt in obj.dtypes],
+            "sample_hash": _hash_head_tail(obj)
+        }
+    else:
+        return str(obj)
+
+# --- head/tailのみの簡易ハッシュ ---
+def _hash_head_tail(df: pl.DataFrame, n=5) -> str:
+    sample = pl.concat([df.head(n), df.tail(n)], how="vertical")
+    return hashlib.sha256(sample.write_csv().encode()).hexdigest()
 
 
 """
