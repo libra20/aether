@@ -26,9 +26,10 @@ plt.style.use('dark_background')
 ★cache_polarsデコレータ
 """
 # --- 設定 ---
-CACHE_ENABLED = os.getenv("POLARS_CACHE_ENABLED", "1") != "0"
-CACHE_DIR = Path(os.getenv("POLARS_CACHE_DIR", "./cache"))
-CACHE_DIR.mkdir(exist_ok=True)
+CACHE_POLARS_ENABLED = os.getenv("CACHE_POLARS_ENABLED", "1") != "0"
+CACHE_POLARS_DIR = Path(os.getenv("CACHE_POLARS_DIR", "./cache"))
+if CACHE_POLARS_ENABLED:
+    CACHE_POLARS_DIR.mkdir(exist_ok=True)
 
 # --- メインデコレータ ---
 def cache_polars(func: Callable):
@@ -43,8 +44,8 @@ def cache_polars(func: Callable):
     - 既存キャッシュは同じ関数名の古いものから1件だけ保持（保存時に削除）
 
     環境変数：
-    - `POLARS_CACHE_DIR`: キャッシュ保存先ディレクトリ（デフォルト: "./cache"）
-    - `POLARS_CACHE_ENABLED`: "0" を指定するとキャッシュを無効化
+    - `CACHE_POLARS_DIR`: キャッシュ保存先ディレクトリ（デフォルト: "./cache"）
+    - `CACHE_POLARS_ENABLED`: "0" を指定するとキャッシュを無効化
 
     例:
         ```python
@@ -75,8 +76,8 @@ def cache_polars(func: Callable):
         base_filename = f"{prefix}_{ts}_{key_hash}"
 
         # --- キャッシュファイル検索（ts無視） ---
-        matched_files = list(CACHE_DIR.glob(f"{prefix}_*_{key_hash}.pkl"))
-        if CACHE_ENABLED and matched_files:
+        matched_files = list(CACHE_POLARS_DIR.glob(f"{prefix}_*_{key_hash}.pkl"))
+        if CACHE_POLARS_ENABLED and matched_files:
             path = max(matched_files, key=os.path.getmtime)
             print(f"[Cache HIT] {path}")
             return _load_result(path)
@@ -104,11 +105,11 @@ def _save_result(base_filename: str, result):
     if result is None:
         raise ValueError("[Cache SAVE ERROR] function returned None, cannot cache")
 
-    path = CACHE_DIR / f"{base_filename}.pkl"
+    path = CACHE_POLARS_DIR / f"{base_filename}.pkl"
 
     # 古い同一キーのファイルを削除
     prefix, key_hash = base_filename.split("_", 1)
-    for old_path in CACHE_DIR.glob(f"{prefix}_*_{key_hash}.pkl"):
+    for old_path in CACHE_POLARS_DIR.glob(f"{prefix}_*_{key_hash}.pkl"):
         if old_path.exists():
             try:
                 old_path.unlink()
