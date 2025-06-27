@@ -1687,7 +1687,7 @@ def _get_dtype_icon(df: pl.DataFrame, col: str) -> str:
         return "🕒"  # 日時
     elif dtype == pl.Date:
         return "📅"  # 日時
-    elif dtype == pl.Timedelta:
+    elif dtype == pl.Duration:
         return "⌛"  # 日時
     else:
         return "❓"  # 不明型
