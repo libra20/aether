@@ -55,7 +55,7 @@ def get_col_bin_numeric(
     max_val = df_concat.select(col).to_series().max()
     locator = mticker.MaxNLocator(nbins=num_n_bins)
     bins = locator.tick_values(min_val, max_val)
-    bins = sorted(set(_round_sig(b, num_sig_digits) for b in bins))
+    bins = sorted(set(_round_sig(b, num_sig_digits) for b in bins))# 有効数字で丸める⇒重複を排す(丸めた影響でかぶりが出る可能性がある)⇒並びが崩れるので並べ直す
     breaks = bins[1:-1]
     labels = _make_bin_labels(bins)
 
@@ -68,6 +68,7 @@ def get_col_bin_numeric(
         if col in df.columns:
             df_bin = df.select(pl.col(col).cut(breaks=breaks, labels=labels).alias(col_bin))
         else:
+            # 元の列がない場合、全部値がNullの列を返す
             df_bin = pl.DataFrame({col_bin: [None] * df.height})
         dfs_bin.append(df_bin)
         if verbose:
@@ -99,16 +100,16 @@ def get_col_bin_datetime(
     dfs_with_col = [df for df in dfs if col in df.columns]
     df_concat = pl.concat([df.select(col) for df in dfs_with_col])
 
-    # 正しく min/max を truncate/offset_by
-    min_trunc = df_concat.select(pl.col(col).min().dt.truncate(dt_truncate_unit)).item()
-    max_offs = df_concat.select(pl.col(col).max().dt.offset_by(dt_truncate_unit)).item()
+    # minをbin始まりとしてtruncate(切り捨て)して、maxに1期間分余分に足したもの(ケツのbinを切り捨てずに切り出すため。後の処理で使う)
+    min_truncated = df_concat.select(pl.col(col).min().dt.truncate(dt_truncate_unit)).item()
+    max_plus_1_unit = df_concat.select(pl.col(col).max().dt.offset_by(dt_truncate_unit)).item()
 
     # ビンの生成
     is_date = df_concat[col].dtype == pl.Date
     range_fn = pl.date_range if is_date else pl.datetime_range
-    bin_starts_plus1 = range_fn(start=min_trunc, end=max_offs, interval=dt_truncate_unit, eager=True)
-    bin_starts = bin_starts_plus1[:-1].to_list()
-    bin_ends = bin_starts_plus1[1:].to_list()
+    bin_starts_plus1 = range_fn(start=min_truncated, end=max_plus_1_unit, interval=dt_truncate_unit, eager=True) # ケツに1期間を足したリスト
+    bin_starts = bin_starts_plus1[:-1].to_list() # ケツの1期間は削る
+    bin_ends = bin_starts_plus1[1:].to_list() # 最初の1期間は削る
     bin_medians = [s + (e - s) // 2 for s, e in zip(bin_starts, bin_ends)]
 
     # ビンの詳細テーブル
@@ -148,7 +149,7 @@ def get_col_bin_categorical(
     verbose: int = 0,
 ) -> tuple[pl.DataFrame, ...]:
 
-    col_bin = f"{col}_bin"
+    col_bin = f"{col}_bin" # カテゴリカルの場合何もしないので意味がないが、他と揃えるためにbin列として新設する
     dfs_bin = []
     for df in dfs:
         if col in df.columns:
