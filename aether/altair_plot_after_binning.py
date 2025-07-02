@@ -3,20 +3,6 @@ from IPython.display import display, Markdown
 import polars as pl
 import altair as alt
 
-from tqdm import tqdm
-
-import os
-import json
-import hashlib
-import functools
-import inspect
-import ast
-import datetime
-from pathlib import Path
-import joblib
-import types
-from typing import Sequence, Optional, Union, Callable
-
 from .polars_binning import get_col_bin_auto
 
 
@@ -27,12 +13,30 @@ def plot_histogram_line_after_binning(
     *dfs: pl.DataFrame,
     col: str,
     col_target: str | list[str] = "sales",
-    color_hist: list[str] = ['royalblue', 'indianred'],
-    color_line: list[str] = ['gold', 'orange'],
-    # ↓binning用
+
+    # binning
     num_n_bins: int = 10,
     num_sig_digits: int = 3,
     dt_truncate_unit: str = "1mo",
+
+    # histogram
+    col_color_hist: str = None, # 優先
+    color_hist: list[str] = ['royalblue', 'indianred'],
+    bar_opacity_hist: float = 0.5,
+    num_x_scale_zero_hist: bool = False,
+    normalize_hist: bool = False,
+
+    # line
+    color_line: list[str] = ['gold', 'orange'], # col_colorが指定されてない時に使われる固定色
+    agg_func_line = pl.mean,
+    col_color_line: str = None,
+    color_scale_scheme_line: str = 'blues', # 'reds' # col_colorが指定された場合の色の系統
+    num_y_scale_zero_line: bool = False,
+    line_size: int = 1,
+    line_opacity: float = 0.7,
+    point_size: int = 5,
+
+    # degug
     verbose: int = 0,
 ) -> alt.Chart:
 
@@ -53,13 +57,15 @@ def plot_histogram_line_after_binning(
     # ヒストグラムチャート群
     hist_charts = []
     for i, df in enumerate(dfs):
-        color = color_hist[i] if color_hist is not None and i < len(color_hist) else None
-        print(f"color: {color}")
+        color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
         chart = _plot_histogram_over_bin(
             df,
             col_bin=col_bin,
             df_bin_detail_info=df_bin_detail_info,
-            color=color
+            color=color_hist_item,
+            bar_opacity=bar_opacity_hist,
+            num_x_scale_zero=num_x_scale_zero_hist,
+            normalize_histogram=normalize_hist,    
         )
         if verbose >= 2:
             display(chart)
@@ -76,13 +82,20 @@ def plot_histogram_line_after_binning(
     for i, df in enumerate(dfs):
         if col_target not in df.columns:
             continue
-        color = color_line[i] if color_line is not None and i < len(color_line) else None
+        color_line_item = color_line[i] if color_line is not None and i < len(color_line) else None
         chart = _plot_line_over_bin(
             df,
             col_bin=col_bin,
             col_target=col_target,
-            color=color,
+            col_color=col_color_line,
+            color_scale_scheme=color_scale_scheme_line, # 'reds' # col_colorが指定された場合の色の系統
+            color=color_line_item,
             df_bin_detail_info=df_bin_detail_info,
+            agg_func=agg_func_line,
+            num_y_scale_zero=num_y_scale_zero_line,
+            line_size=line_size,
+            line_opacity=line_opacity,
+            point_size=point_size,
         )
         if verbose >= 2:
             display(chart)
