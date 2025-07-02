@@ -1,6 +1,6 @@
 from IPython.display import display
 import polars as pl
-from typing import Iterator
+import types
 import matplotlib.ticker as mticker
 import math
 
@@ -11,7 +11,7 @@ def get_col_bin_auto(
     num_n_bins: int = 10,
     num_sig_digits: int = 3,
     dt_truncate_unit: str = "1mo",
-    verbose: bool = False
+    verbose: int = 0,
 ) -> tuple[pl.DataFrame, ...]:
     """
     
@@ -171,3 +171,40 @@ def _round_sig(x: float, sig: int) -> float:
 
 def _make_bin_labels(bins: list[float]) -> list[str]:
     return [f"{start}–{end}" for start, end in zip(bins[:-1], bins[1:])]
+
+
+def assert_df_bin_detail_info_columns(df: pl.DataFrame, col_bin: str) -> None:
+    """
+    指定された col_bin に基づき、df_bin_detail_info が必要な列を持っているか確認する。
+
+    必須列:
+        - col_bin
+        - {col_bin}_start
+        - {col_bin}_end
+        - {col_bin}_median
+
+    Raises:
+        AssertionError: いずれかの列が存在しない場合
+    """
+    required_cols = [
+        col_bin,
+        f"{col_bin}_start",
+        f"{col_bin}_end",
+        f"{col_bin}_median",
+    ]
+    missing = [col for col in required_cols if col not in df.columns]
+
+    assert not missing, f"Missing columns in df_bin_detail_info: {missing}"
+
+
+"""
+__all__ を動的に生成（このモジュール内の関数だけを対象にする）
+"""
+__all__ = [
+    name for name, val in globals().items()
+    if (
+        (isinstance(val, types.FunctionType) or isinstance(val, type))  # 関数 or クラス
+        and 
+        val.__module__ == __name__  # このモジュール内のものに限定
+    )
+]

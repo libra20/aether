@@ -2,7 +2,7 @@ from IPython.display import display, Markdown
 
 import polars as pl
 import altair as alt
-import matplotlib.pyplot as plt
+
 from tqdm import tqdm
 
 import os
@@ -17,16 +17,106 @@ import joblib
 import types
 from typing import Sequence, Optional, Union, Callable
 
+from .polars_binning import get_col_bin_auto
+
 
 alt.themes.enable('dark')
-plt.style.use('dark_background')
+
+
+def plot_histogram_line_after_binning(
+    *dfs: pl.DataFrame,
+    col: str,
+    col_target: str | list[str] = "sales",
+    color_hist: list[str] = ['royalblue', 'indianred'],
+    color_line: list[str] = ['gold', 'orange'],
+    # ↓binning用
+    num_n_bins: int = 10,
+    num_sig_digits: int = 3,
+    dt_truncate_unit: str = "1mo",
+    verbose: int = 0,
+) -> alt.Chart:
+
+    # bin処理（共通のbinを作る）
+    *dfs_binned, df_bin_detail_info = get_col_bin_auto(
+        *dfs, 
+        col=col,
+        num_n_bins=num_n_bins,
+        num_sig_digits=num_sig_digits,
+        dt_truncate_unit=dt_truncate_unit,
+        verbose=verbose,
+        )
+    col_bin = f"{col}_bin"
+
+    # binnedを適用した DataFrame を取得
+    dfs = [df.with_columns(df_binned) for df, df_binned in zip(dfs, dfs_binned)]
+
+    # ヒストグラムチャート群
+    hist_charts = []
+    for i, df in enumerate(dfs):
+        color = color_hist[i] if color_hist is not None and i < len(color_hist) else None
+        print(f"color: {color}")
+        chart = _plot_histogram_over_bin(
+            df,
+            col_bin=col_bin,
+            df_bin_detail_info=df_bin_detail_info,
+            color=color
+        )
+        if verbose >= 2:
+            display(chart)
+        hist_charts.append(chart)
+
+    # ヒストグラムをオーバーレイ
+    chart_hist_overlay = alt.layer(*hist_charts).resolve_scale(
+        y='shared', color='shared'
+    )
+    if verbose >= 2:
+        display(chart_hist_overlay)
+
+    line_charts = []
+    for i, df in enumerate(dfs):
+        if col_target not in df.columns:
+            continue
+        color = color_line[i] if color_line is not None and i < len(color_line) else None
+        chart = _plot_line_over_bin(
+            df,
+            col_bin=col_bin,
+            col_target=col_target,
+            color=color,
+            df_bin_detail_info=df_bin_detail_info,
+        )
+        if verbose >= 2:
+            display(chart)
+        line_charts.append(chart)
+    chart_line_overlay = alt.layer(*line_charts).resolve_scale(
+        y='shared', color='shared'
+    )
+    if verbose >= 2:
+        display(chart_line_overlay)
+
+    # 総合チャート（ヒストグラム＋折れ線群）
+    chart = alt.layer(chart_hist_overlay, chart_line_overlay).resolve_scale(
+        y='independent', color='independent'
+    )
+    return chart
+
+
+def plot_histogram_after_binning(
+        
+) -> alt.Chart:
+    pass
+
+
+def plot_line_after_binning(
+        
+) -> alt.Chart:
+    pass
 
 
 """
 ★plot_histogram関数
 - ↑のbinning関数を内部で使って、それを使って集計したものをHistogramにする処理
 """
-def plot_histogram(
+def _plot_histogram_over_bin(
     df: pl.DataFrame,
     col_bin: str,
     df_bin_detail_info: pl.DataFrame = None,
@@ -36,7 +126,7 @@ def plot_histogram(
     num_x_scale_zero: bool = False,
     normalize_histogram: bool = False,
     title: str = None,
-    verbose: bool = False
+    verbose: int = 0,
 ) -> alt.Chart:
     """
     Altair でヒストグラム（棒グラフ）を描画する関数。
@@ -171,7 +261,7 @@ def plot_histogram(
 """
 ★plot_line_point_over_bin関数
 """
-def plot_line_point_over_bin(
+def _plot_line_over_bin(
     df: pl.DataFrame,
     col_bin: str,
     col_target: str,
@@ -184,7 +274,7 @@ def plot_line_point_over_bin(
     line_opacity: float = 0.7,
     point_size: int = 5,
     num_y_scale_zero: bool = False,
-    verbose: bool = False,
+    verbose: int = 0,
 ) -> alt.Chart:
     """
     ビンごとにターゲット列を集約し、線＋点プロットを Altair で描画する関数。
