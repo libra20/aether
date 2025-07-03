@@ -22,13 +22,13 @@ def plot_histogram_line_after_binning(
 
     # histogram
     col_color_hist: str = None, # 優先
-    color_hist: list[str] = ['royalblue', 'indianred'],
+    data_color_hist: list[str] = ['royalblue', 'indianred'],
     bar_opacity_hist: float = 0.5,
     num_x_scale_zero_hist: bool = False,
     normalize_hist: bool = False,
 
     # line
-    color_line: list[str] = ['gold', 'orange'], # col_colorが指定されてない時に使われる固定色
+    data_color_line: list[str] = ['gold', 'orange'], # col_colorが指定されてない時に使われる固定色
     agg_func_line = pl.mean,
     col_color_line: str = None,
     color_scale_scheme_line: str = 'blues', # 'reds' # col_colorが指定された場合の色の系統
@@ -56,73 +56,97 @@ def plot_histogram_line_after_binning(
     dfs = [df.with_columns(df_binned) for df, df_binned in zip(dfs, dfs_binned)]
 
     # ヒストグラムチャート群
-    hist_charts = []
+    # hist_charts = []
     # scaleがレジェンドとして一式吐かれるっぽいので、先頭のやつだけ出してまとめるのがいいかも。(2回目からは出さない)
     # その場合、dfに対象列があるかどうかのチェックは必須
     # つかそこまで頑張るならループよりもconcatしてからのほうが楽な気もする。その場合col_colorを自然に使えるし
     # いやその場合normalizeとかめんどいかも？少なくとも前もっての処理がめんどくはなりそう。
     # groupbyを丁寧にやりゃいいだけか？⇒と思ったら既に対応済みで草。concatが楽かも…処理はわかりにくいけどコードはスッキリしそう
-    scale=alt.Scale(domain=['train', 'test'], range=['royalblue', 'indianred'])
-    for i, df in enumerate(dfs):
-        color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
-        data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
-        chart = _plot_histogram_over_bin(
-            df,
-            col_bin=col_bin,
-            data_name=data_name_item,
-            df_bin_detail_info=df_bin_detail_info,
-            color=color_hist_item,
-            bar_opacity=bar_opacity_hist,
-            num_x_scale_zero=num_x_scale_zero_hist,
-            normalize_histogram=normalize_hist,    
-            scale=scale,
-        )
-        if verbose >= 2:
-            display(chart)
-        hist_charts.append(chart)
+    if not col_color_hist or len(dfs) >= 2:
+        print('a')
+        scale=alt.Scale(domain=data_name, range=data_color_hist)
+    else:
+        scale=alt.Scale(scale=col_color_hist)
 
-    # ヒストグラムをオーバーレイ
-    chart_hist_overlay = alt.layer(*hist_charts).resolve_scale(
-        y='shared', color='independent'
+    # 必要な列を決定
+    cols_needed = [col_bin]
+    if col_color_hist:
+        cols_needed.append(col_color_hist)
+    if col_target:
+        cols_needed.append(col_target)
+
+    # 必要な列だけ select + data_name 列を追加（if必要）
+    dfs_selected = [
+        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(data_name[i]).alias("data_name")) if data_name else
+        df.select([col for col in cols_needed if col in df.columns])
+        for i, df in enumerate(dfs)
+    ]
+
+    # 結合
+    df_concat = pl.concat(dfs_selected)
+    
+    display(df_concat)
+
+    # for i, df in enumerate(dfs):
+        # color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
+        # data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
+    chart = _plot_histogram_over_bin(
+        df_concat,
+        col_bin=col_bin,
+        # data_name=data_name_item,
+        df_bin_detail_info=df_bin_detail_info,
+        # color=color_hist_item,
+        bar_opacity=bar_opacity_hist,
+        num_x_scale_zero=num_x_scale_zero_hist,
+        normalize_histogram=normalize_hist,    
+        scale=scale,
     )
     if verbose >= 2:
-        display(chart_hist_overlay)
+        display(chart)
+        # hist_charts.append(chart)
 
-    line_charts = []
-    for i, df in enumerate(dfs):
-        if col_target not in df.columns:
-            continue
-        color_line_item = color_line[i] if color_line is not None and i < len(color_line) else None
-        data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
-        print(data_name_item)
-        chart = _plot_line_over_bin(
-            df,
-            col_bin=col_bin,
-            col_target=col_target,
-            data_name=data_name_item,
-            col_color=col_color_line,
-            color_scale_scheme=color_scale_scheme_line, # 'reds' # col_colorが指定された場合の色の系統
-            color=color_line_item,
-            df_bin_detail_info=df_bin_detail_info,
-            agg_func=agg_func_line,
-            num_y_scale_zero=num_y_scale_zero_line,
-            line_size=line_size,
-            line_opacity=line_opacity,
-            point_size=point_size,
-        )
-        if verbose >= 2:
-            display(chart)
-        line_charts.append(chart)
-    chart_line_overlay = alt.layer(*line_charts).resolve_scale(
-        y='shared', color='independent'
-    )
-    if verbose >= 2:
-        display(chart_line_overlay)
+    # # ヒストグラムをオーバーレイ
+    # chart_hist_overlay = alt.layer(*hist_charts).resolve_scale(
+    #     y='shared', color='independent'
+    # )
+    # if verbose >= 2:
+    #     display(chart_hist_overlay)
 
-    # 総合チャート（ヒストグラム＋折れ線群）
-    chart = alt.layer(chart_hist_overlay, chart_line_overlay).resolve_scale(
-        y='independent', color='independent'
-    )
+    # line_charts = []
+    # for i, df in enumerate(dfs):
+    #     if col_target not in df.columns:
+    #         continue
+    #     color_line_item = data_color_line[i] if data_color_line is not None and i < len(data_color_line) else None
+    #     data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
+    #     print(data_name_item)
+    #     chart = _plot_line_over_bin(
+    #         df,
+    #         col_bin=col_bin,
+    #         col_target=col_target,
+    #         data_name=data_name_item,
+    #         col_color=col_color_line,
+    #         color_scale_scheme=color_scale_scheme_line, # 'reds' # col_colorが指定された場合の色の系統
+    #         color=color_line_item,
+    #         df_bin_detail_info=df_bin_detail_info,
+    #         agg_func=agg_func_line,
+    #         num_y_scale_zero=num_y_scale_zero_line,
+    #         line_size=line_size,
+    #         line_opacity=line_opacity,
+    #         point_size=point_size,
+    #     )
+    #     if verbose >= 2:
+    #         display(chart)
+    #     line_charts.append(chart)
+    # chart_line_overlay = alt.layer(*line_charts).resolve_scale(
+    #     y='shared', color='independent'
+    # )
+    # if verbose >= 2:
+    #     display(chart_line_overlay)
+
+    # # 総合チャート（ヒストグラム＋折れ線群）
+    # chart = alt.layer(chart_hist_overlay, chart_line_overlay).resolve_scale(
+    #     y='independent', color='independent'
+    # )
     return chart
 
 
@@ -146,14 +170,15 @@ def _plot_histogram_over_bin(
     df: pl.DataFrame,
     col_bin: str,
     df_bin_detail_info: pl.DataFrame = None,
-    data_name: str = 'train',
-    col_color: str = None, # 優先
-    color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
+    # data_name: str = 'train',
+    # alt.Colorだけを渡すほうがいいかも★
+    col_color: str = 'data_name', # 優先
+    scale=None,
+    # color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
     bar_opacity: float = 0.5,
     num_x_scale_zero: bool = False,
     normalize_histogram: bool = False,
     title: str = None,
-    scale=None,
     verbose: int = 0,
 ) -> alt.Chart:
     """
@@ -231,10 +256,10 @@ def _plot_histogram_over_bin(
         print(f'group_keys: {group_keys}')
     df_agg = df.group_by(pl.col(group_keys)).agg(expr)
 
-    # 固定色用のダミー列を仕込んでおく
-    # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
-    if not col_color and color:
-        df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
+    # # 固定色用のダミー列を仕込んでおく
+    # # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
+    # if not col_color and color:
+    #     df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
 
     if verbose:
         print('df_agg:')
@@ -284,12 +309,14 @@ def _plot_histogram_over_bin(
     chart = chart.mark_bar(opacity=bar_opacity, stroke='gray', strokeWidth=1).properties(title=title)
 
     # mark_bar 後の色指定
-    if col_color:
-        chart = chart.encode(color=alt.Color(f"{col_color}:N"))
-    elif color:
-        legend_label = data_name
-        # chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
-        chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=scale))
+    if scale:
+        chart = chart.encode(color=alt.Color(f'data_name:N', legend=alt.Legend(title=None), scale=scale))
+    # if col_color:
+    #     chart = chart.encode(color=alt.Color(f"{col_color}:N"))
+    # elif color:
+    #     legend_label = data_name
+    #     # chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
+    #     chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=scale))
 
     return chart
 
