@@ -57,6 +57,12 @@ def plot_histogram_line_after_binning(
 
     # ヒストグラムチャート群
     hist_charts = []
+    # scaleがレジェンドとして一式吐かれるっぽいので、先頭のやつだけ出してまとめるのがいいかも。(2回目からは出さない)
+    # その場合、dfに対象列があるかどうかのチェックは必須
+    # つかそこまで頑張るならループよりもconcatしてからのほうが楽な気もする。その場合col_colorを自然に使えるし
+    # いやその場合normalizeとかめんどいかも？少なくとも前もっての処理がめんどくはなりそう。
+    # groupbyを丁寧にやりゃいいだけか？⇒と思ったら既に対応済みで草。concatが楽かも…処理はわかりにくいけどコードはスッキリしそう
+    scale=alt.Scale(domain=['train', 'test'], range=['royalblue', 'indianred'])
     for i, df in enumerate(dfs):
         color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
         data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
@@ -69,6 +75,7 @@ def plot_histogram_line_after_binning(
             bar_opacity=bar_opacity_hist,
             num_x_scale_zero=num_x_scale_zero_hist,
             normalize_histogram=normalize_hist,    
+            scale=scale,
         )
         if verbose >= 2:
             display(chart)
@@ -146,6 +153,7 @@ def _plot_histogram_over_bin(
     num_x_scale_zero: bool = False,
     normalize_histogram: bool = False,
     title: str = None,
+    scale=None,
     verbose: int = 0,
 ) -> alt.Chart:
     """
@@ -280,7 +288,8 @@ def _plot_histogram_over_bin(
         chart = chart.encode(color=alt.Color(f"{col_color}:N"))
     elif color:
         legend_label = data_name
-        chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
+        # chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
+        chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=scale))
 
     return chart
 
