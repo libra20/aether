@@ -367,84 +367,31 @@ def _plot_line_over_bin(
     if verbose:
         print(f"col_x: {col_x}, col_color: {col_color}")
 
-    base = alt.Chart(df_agg)
     enc_x = alt.X(col_x)
     enc_y = alt.Y(f"{col_target_agg}:Q", axis=alt.Axis(orient="right"), scale=alt.Scale(zero=num_y_scale_zero))
-
     if col_color:
-        enc_color = alt.Color(f"{col_color}:N", legend=alt.Legend(title=None), scale=alt.Scale(scheme=color_scale_scheme))
-        enc_shape = alt.Shape(f"{col_color}:N")
+        chart_base = alt.Chart(df_agg)
+        enc_color_line = alt.Color(f"{col_color}:N", legend=alt.Legend(title=None), scale=alt.Scale(scheme=color_scale_scheme))
+        enc_color_point = alt.Color(f"{col_color}:N", legend=None, scale=alt.Scale(scheme=color_scale_scheme))
     elif color:
-        enc_color = alt.value(color)
-        enc_shape = alt.value("circle")  # shapeも固定（任意）
+        # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
+        df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
+        chart_base = alt.Chart(df_agg)
+        legend_label = data_name
+        enc_color_line = alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color]))
+        enc_color_point = alt.Color(f"legend_label:N", legend=None, scale=alt.Scale(domain=[legend_label], range=[color]))
     else:
-        enc_color = alt.Undefined
-        enc_shape = alt.Undefined
+        chart_base = alt.Chart(df_agg)
+        enc_color_line = alt.Undefined
+        enc_color_point = alt.Undefined
 
-    chart_line = base.mark_line(size=line_size, opacity=line_opacity).encode(
-        x=enc_x, y=enc_y, color=enc_color
-    )
-    chart_line = mark_with_fixed_color_and_legend(chart_line, data_name, color)
-
-    chart_point = base.mark_point(size=point_size, opacity=line_opacity).encode(
-        x=enc_x, y=enc_y, color=enc_color#, shape=enc_shape_point
+    chart_line = chart_base.mark_line(size=line_size, opacity=line_opacity).encode(
+        x=enc_x, y=enc_y, color=enc_color_line
     )
 
-    # if col_color:
-    #     # line用（legendあり）
-    #     enc_color_line = alt.Color(f"{col_color}:N", legend=alt.Legend(title=None), scale=alt.Scale(scheme=color_scale_scheme))
-    #     # enc_shape_line = alt.Shape(f"{col_color}:N", legend=None)
+    chart_point = chart_base.mark_point(size=point_size, opacity=line_opacity).encode(
+        x=enc_x, y=enc_y, color=enc_color_point#, shape=enc_shape
 
-    #     # point用（legendなし）
-    #     enc_color_point = alt.Color(f"{col_color}:N", legend=None, scale=alt.Scale(scheme=color_scale_scheme))
-    #     # enc_shape_point = alt.Shape(f"{col_color}:N", legend=None)
-    # elif color:
-    #     label = f"{col_target}"
-    #     # df = df.with_columns(pl.lit(label).alias('label'))
-    #     # enc_color_line = enc_color_point = alt.Color("label:N", scale=alt.Scale(domain=[label], range=[color]), legend=alt.Legend(title=None))
-    #     # enc_color_point = enc_shape_point = alt.value(color)
-    #     # enc_shape_point = alt.value("circle")  # shapeも固定（任意）
-    # else:
-    #     enc_color_line = enc_color_point = alt.Undefined
-    #     # enc_color_point = enc_shape_point = alt.Undefined
+    )
 
-    # chart_line = base.mark_line(size=line_size, opacity=line_opacity).encode(
-    #     x=enc_x, y=enc_y, color=enc_color_line
-    # )
-
-    # chart_point = base.mark_point(size=point_size, opacity=line_opacity).encode(
-    #     x=enc_x, y=enc_y, color=enc_color_point#, shape=enc_shape_point
-    # )
     return alt.layer(chart_line, chart_point).resolve_scale(y='shared', color='independent', shape='independent')
-
-
-import altair as alt
-import pandas as pd
-import uuid
-
-def mark_with_fixed_color_and_legend(chart: alt.Chart, label: str, color: str, title: str = None) -> alt.Chart:
-    """
-    chart に固定色 + 凡例を追加し、元のデータは変更せずに内部的に label 列を追加する。
-    chart: Altair Chart オブジェクト
-    label: 凡例で表示する名前
-    color: 表示色（"orange", "#FF0000" など）
-    title: 凡例タイトル（Noneで非表示）
-    """
-    # label列が衝突しないようにユニークな列名にする
-    label_col = f"__label_{uuid.uuid4().hex[:8]}"
-
-    # チャートに label 列を追加
-    chart = chart.transform_calculate(**{
-        label_col: f'"{label}"'  # Vega式で文字列にする
-    })
-
-    # color encoding を設定（固定色 + 凡例）
-    chart = chart.encode(
-        color=alt.Color(
-            f"{label_col}:N",
-            scale=alt.Scale(domain=[label], range=[color]),
-            legend=alt.Legend(title=title)
-        )
-    )
-
-    return chart
