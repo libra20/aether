@@ -59,9 +59,11 @@ def plot_histogram_line_after_binning(
     hist_charts = []
     for i, df in enumerate(dfs):
         color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
+        data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
         chart = _plot_histogram_over_bin(
             df,
             col_bin=col_bin,
+            data_name=data_name_item,
             df_bin_detail_info=df_bin_detail_info,
             color=color_hist_item,
             bar_opacity=bar_opacity_hist,
@@ -74,7 +76,7 @@ def plot_histogram_line_after_binning(
 
     # ヒストグラムをオーバーレイ
     chart_hist_overlay = alt.layer(*hist_charts).resolve_scale(
-        y='shared', color='shared'
+        y='shared', color='independent'
     )
     if verbose >= 2:
         display(chart_hist_overlay)
@@ -105,7 +107,7 @@ def plot_histogram_line_after_binning(
             display(chart)
         line_charts.append(chart)
     chart_line_overlay = alt.layer(*line_charts).resolve_scale(
-        y='shared', color='shared'
+        y='shared', color='independent'
     )
     if verbose >= 2:
         display(chart_line_overlay)
@@ -137,6 +139,7 @@ def _plot_histogram_over_bin(
     df: pl.DataFrame,
     col_bin: str,
     df_bin_detail_info: pl.DataFrame = None,
+    data_name: str = 'train',
     col_color: str = None, # 優先
     color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
     bar_opacity: float = 0.5,
@@ -219,6 +222,12 @@ def _plot_histogram_over_bin(
     if verbose:
         print(f'group_keys: {group_keys}')
     df_agg = df.group_by(pl.col(group_keys)).agg(expr)
+
+    # 固定色用のダミー列を仕込んでおく
+    # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
+    if not col_color and color:
+        df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
+
     if verbose:
         print('df_agg:')
         display(df_agg)
@@ -270,7 +279,8 @@ def _plot_histogram_over_bin(
     if col_color:
         chart = chart.encode(color=alt.Color(f"{col_color}:N"))
     elif color:
-        chart = chart.encode(color=alt.value(color))
+        legend_label = data_name
+        chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
 
     return chart
 
@@ -354,6 +364,11 @@ def _plot_line_over_bin(
     group_keys = [col_bin] + ([col_color] if col_color else [])
     df_agg = df.group_by(group_keys).agg(agg_func(col_target).alias(col_target_agg))
 
+    # 固定色用のダミー列を仕込んでおく
+    # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
+    if not col_color and color:
+        df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
+
     if df_bin_detail_info is not None:
         df_agg = df_agg.join(df_bin_detail_info, on=col_bin, how="left")
 
@@ -367,16 +382,13 @@ def _plot_line_over_bin(
     if verbose:
         print(f"col_x: {col_x}, col_color: {col_color}")
 
+    chart_base = alt.Chart(df_agg)
     enc_x = alt.X(col_x)
     enc_y = alt.Y(f"{col_target_agg}:Q", axis=alt.Axis(orient="right"), scale=alt.Scale(zero=num_y_scale_zero))
     if col_color:
-        chart_base = alt.Chart(df_agg)
         enc_color_line = alt.Color(f"{col_color}:N", legend=alt.Legend(title=None), scale=alt.Scale(scheme=color_scale_scheme))
         enc_color_point = alt.Color(f"{col_color}:N", legend=None, scale=alt.Scale(scheme=color_scale_scheme))
     elif color:
-        # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
-        df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
-        chart_base = alt.Chart(df_agg)
         legend_label = data_name
         enc_color_line = alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color]))
         enc_color_point = alt.Color(f"legend_label:N", legend=None, scale=alt.Scale(domain=[legend_label], range=[color]))
