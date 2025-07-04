@@ -2,6 +2,7 @@ from IPython.display import display, Markdown
 
 import polars as pl
 import altair as alt
+from typing import Literal
 
 from .polars_binning import get_col_bin_auto
 
@@ -13,7 +14,7 @@ def plot_histogram_line_after_binning(
     *dfs: pl.DataFrame,
     col: str,
     col_target: str | list[str] = "sales",
-    data_name: list[str] = ['train', 'test'],
+    col_color_scale_domain: list[str] = ['train', 'test'], # map元(値)
 
     # binning
     num_n_bins: int = 10,
@@ -21,8 +22,11 @@ def plot_histogram_line_after_binning(
     dt_truncate_unit: str = "1mo",
 
     # histogram
-    col_color_hist: str = None, # 優先
-    data_color_hist: list[str] = ['royalblue', 'indianred'],
+    col_color_hist: str = 'data_name', # 優先
+    col_color_scale_mode_hist: Literal["scheme", "domain_range"] = "domain_range",
+    col_color_scale_range_hist: list[str] = ['royalblue', 'indianred'], # map先(色)
+    col_color_scale_scheme_hist: str = 'category10',
+    col_color_legend_title_hist: str = 'data',
     bar_opacity_hist: float = 0.5,
     num_x_scale_zero_hist: bool = False,
     normalize_hist: bool = False,
@@ -62,30 +66,35 @@ def plot_histogram_line_after_binning(
     # つかそこまで頑張るならループよりもconcatしてからのほうが楽な気もする。その場合col_colorを自然に使えるし
     # いやその場合normalizeとかめんどいかも？少なくとも前もっての処理がめんどくはなりそう。
     # groupbyを丁寧にやりゃいいだけか？⇒と思ったら既に対応済みで草。concatが楽かも…処理はわかりにくいけどコードはスッキリしそう
-    if not col_color_hist or len(dfs) >= 2:
-        print('a')
-        scale=alt.Scale(domain=data_name, range=data_color_hist)
-    else:
-        scale=alt.Scale(scale=col_color_hist)
+    # 必要な列だけ select + data_name 列を追加（if必要）
+    
 
-    # 必要な列を決定
+    # グラフ描画で必要な列
     cols_needed = [col_bin]
-    if col_color_hist:
+    if col_color_hist and col_color_hist not in cols_needed:
         cols_needed.append(col_color_hist)
-    if col_target:
+    if col_target and col_target not in cols_needed:
         cols_needed.append(col_target)
 
-    # 必要な列だけ select + data_name 列を追加（if必要）
+    # グラフ描画で必要な列だけをselect
+    # col_color_histを持っているDataFrameが1つもない場合、col_color_histを外付けする(複数dfの場合などでdf自体への色付け指定と見做す)
+    any_df_has_col_color_hist = any(col_color_hist in df.columns for df in dfs)
     dfs_selected = [
-        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(data_name[i]).alias("data_name")) if data_name else
+        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(col_color_scale_domain[i]).alias(col_color_hist)) if not any_df_has_col_color_hist else
         df.select([col for col in cols_needed if col in df.columns])
         for i, df in enumerate(dfs)
     ]
 
     # 結合
     df_concat = pl.concat(dfs_selected)
-    
-    display(df_concat)
+    if verbose:   
+        display(df_concat)
+
+    # 色のスケール(変換ルール)を作成する
+    if col_color_scale_mode_hist == 'domain_range':
+        col_color_scale_hist=alt.Scale(domain=col_color_scale_domain, range=col_color_scale_range_hist)
+    else:
+        col_color_scale_hist=alt.Scale(scheme="category10") 
 
     # for i, df in enumerate(dfs):
         # color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
@@ -98,8 +107,10 @@ def plot_histogram_line_after_binning(
         # color=color_hist_item,
         bar_opacity=bar_opacity_hist,
         num_x_scale_zero=num_x_scale_zero_hist,
-        normalize_histogram=normalize_hist,    
-        scale=scale,
+        normalize_histogram=normalize_hist,
+        col_color=col_color_hist,
+        col_color_scale=col_color_scale_hist,
+        col_color_legend_title=col_color_legend_title_hist,
     )
     if verbose >= 2:
         display(chart)
@@ -172,8 +183,9 @@ def _plot_histogram_over_bin(
     df_bin_detail_info: pl.DataFrame = None,
     # data_name: str = 'train',
     # alt.Colorだけを渡すほうがいいかも★
-    col_color: str = 'data_name', # 優先
-    scale=None,
+    col_color: str=None, # 優先
+    col_color_scale=None,
+    col_color_legend_title=None,
     # color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
     bar_opacity: float = 0.5,
     num_x_scale_zero: bool = False,
@@ -309,8 +321,8 @@ def _plot_histogram_over_bin(
     chart = chart.mark_bar(opacity=bar_opacity, stroke='gray', strokeWidth=1).properties(title=title)
 
     # mark_bar 後の色指定
-    if scale:
-        chart = chart.encode(color=alt.Color(f'data_name:N', legend=alt.Legend(title=None), scale=scale))
+    if col_color_scale:
+        chart = chart.encode(color=alt.Color(f'{col_color}:N', legend=alt.Legend(title=col_color_legend_title), scale=col_color_scale))
     # if col_color:
     #     chart = chart.encode(color=alt.Color(f"{col_color}:N"))
     # elif color:
