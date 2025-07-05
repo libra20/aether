@@ -15,7 +15,6 @@ def plot_histogram_line_after_binning(
     col: str,
     col_target: str | list[str] = "sales",
     col_color_scale_domain: list[str] = ['train', 'test'], # map元(値)
-    chart_title: str = None,
 
     # binning - numeric
     num_n_bins: int = 10,
@@ -72,53 +71,48 @@ def plot_histogram_line_after_binning(
     # 必要な列だけ select + data_name 列を追加（if必要）
     
 
-    # # グラフ描画で必要な列
-    # cols_needed = [col_bin]
-    # if col_color_hist and col_color_hist not in cols_needed:
-    #     cols_needed.append(col_color_hist)
-    # if col_target and col_target not in cols_needed:
-    #     cols_needed.append(col_target)
+    # グラフ描画で必要な列
+    cols_needed = [col_bin]
+    if col_color_hist and col_color_hist not in cols_needed:
+        cols_needed.append(col_color_hist)
+    if col_target and col_target not in cols_needed:
+        cols_needed.append(col_target)
 
-    # # グラフ描画で必要な列だけをselect
-    # # col_color_histを持っているDataFrameが1つもない場合、col_color_histを外付けする(複数dfの場合などでdf自体への色付け指定と見做す)
-    # any_df_has_col_color_hist = any(col_color_hist in df.columns for df in dfs)
-    # dfs_selected = [
-    #     df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(col_color_scale_domain[i]).alias(col_color_hist)) if not any_df_has_col_color_hist else
-    #     df.select([col for col in cols_needed if col in df.columns])
-    #     for i, df in enumerate(dfs)
-    # ]
+    # グラフ描画で必要な列だけをselect
+    # col_color_histを持っているDataFrameが1つもない場合、col_color_histを外付けする(複数dfの場合などでdf自体への色付け指定と見做す)
+    any_df_has_col_color_hist = any(col_color_hist in df.columns for df in dfs)
+    dfs_selected = [
+        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(col_color_scale_domain[i]).alias(col_color_hist)) if not any_df_has_col_color_hist else
+        df.select([col for col in cols_needed if col in df.columns])
+        for i, df in enumerate(dfs)
+    ]
 
-    # # 結合
-    # df_concat = pl.concat(dfs_selected)
-    # if verbose:   
-    #     display(df_concat)
+    # 結合
+    df_concat = pl.concat(dfs_selected)
+    if verbose:   
+        display(df_concat)
 
-    # # 色のスケール(変換ルール)を作成する
-    # if col_color_scale_mode_hist == 'domain_range':
-    #     col_color_scale_hist=alt.Scale(domain=col_color_scale_domain, range=col_color_scale_range_hist)
-    # else:
-    #     col_color_scale_hist=alt.Scale(scheme=col_color_scale_scheme_hist) 
+    # 色のスケール(変換ルール)を作成する
+    if col_color_scale_mode_hist == 'domain_range':
+        col_color_scale_hist=alt.Scale(domain=col_color_scale_domain, range=col_color_scale_range_hist)
+    else:
+        col_color_scale_hist=alt.Scale(scheme=col_color_scale_scheme_hist) 
 
     # for i, df in enumerate(dfs):
         # color_hist_item = color_hist[i] if color_hist is not None and i < len(color_hist) else None
         # data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
     chart = _plot_histogram_over_bin(
-        *dfs,
+        df_concat,
         col_bin=col_bin,
         # data_name=data_name_item,
         df_bin_detail_info=df_bin_detail_info,
-        chart_title=chart_title,
-        col_color_scale_domain=col_color_scale_domain,
         # color=color_hist_item,
-        col_color_hist=col_color_hist,
-        col_color_scale_mode_hist=col_color_scale_mode_hist,
-        col_color_scale_range_hist=col_color_scale_range_hist, # map先(色)
-        col_color_scale_scheme_hist=col_color_scale_scheme_hist,
-        col_color_legend_title_hist=col_color_legend_title_hist,
-        bar_opacity_hist=bar_opacity_hist,
-        normalize_hist=normalize_hist,
-        num_x_scale_zero_hist=num_x_scale_zero_hist,
-        verbose=verbose,
+        bar_opacity=bar_opacity_hist,
+        col_color=col_color_hist,
+        col_color_scale=col_color_scale_hist,
+        col_color_legend_title=col_color_legend_title_hist,
+        normalize_histogram=normalize_hist,
+        num_x_scale_zero=num_x_scale_zero_hist,
     )
     if verbose >= 2:
         display(chart)
@@ -186,119 +180,151 @@ def plot_line_after_binning(
 - ↑のbinning関数を内部で使って、それを使って集計したものをHistogramにする処理
 """
 def _plot_histogram_over_bin(
-    *dfs: pl.DataFrame,
+    df: pl.DataFrame,
     col_bin: str,
     df_bin_detail_info: pl.DataFrame = None,
-    col_color_scale_domain: list[str] = ['train', 'test'], # map元(値)
-    chart_title: str = None,
     # data_name: str = 'train',
     # alt.Colorだけを渡すほうがいいかも★
-    # col_color: str=None, # 優先
-    # col_color_scale=None,
-    # col_color_legend_title=None,
-    # # color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
-    # bar_opacity: float = 0.5,
-    # num_x_scale_zero: bool = False,
-    # normalize_histogram: bool = False,
-    # title: str = None,
-
-    # histogram
-    col_color_hist: str = 'data_name', # 優先
-    col_color_scale_mode_hist: Literal["scheme", "domain_range"] = "domain_range",
-    col_color_scale_range_hist: list[str] = ['royalblue', 'indianred'], # map先(色)
-    col_color_scale_scheme_hist: str = 'category10',
-    col_color_legend_title_hist: str = 'data',
-    bar_opacity_hist: float = 0.5,
-    normalize_hist: bool = False,
-    # histogram - numeric
-    num_x_scale_zero_hist: bool = False,
-
+    col_color: str=None, # 優先
+    col_color_scale=None,
+    col_color_legend_title=None,
+    # color: str = 'royalblue',  # col_colorが指定されてない場合に使われる固定色
+    bar_opacity: float = 0.5,
+    num_x_scale_zero: bool = False,
+    normalize_histogram: bool = False,
+    title: str = None,
     verbose: int = 0,
 ) -> alt.Chart:
+    """
+    Altair でヒストグラム（棒グラフ）を描画する関数。
 
-    if chart_title is None:
-        if col_bin.endswith("_bin"):
-            chart_title = col_bin.removesuffix("_bin")
-        else:
-            chart_title = col_bin
+    ビン列（カテゴリ、数値、または日付のビン）をもとに集計し、棒グラフとして表示する。
+    日付・数値ビンの場合は `df_bin_detail_info` を渡すことで棒の幅を明示的に設定可能。
+
+    パラメータ
+    ----------
+    df : pl.DataFrame
+        入力データ。ビン列を含んでいる必要がある。
+
+    col_bin : str
+        ビニング済みの列名（"xxx_bin" など）。棒グラフのX軸となる。
+
+    df_bin_detail_info : pl.DataFrame, optional
+        ビンの詳細情報（`_start`, `_end` 列など）を含むDataFrame。
+        これが指定されている場合、Altair の `x` と `x2` を用いて棒の幅を連続値として描画する。
+
+    col_color : str, optional
+        グループ毎に色分けしたい列名。None の場合は色分けしない。
+
+    bar_opacity : float, optional (default=0.5)
+        棒の透明度。
+
+    num_x_scale_zero : bool, optional (default=False)
+        X軸（連続値）のスケールにゼロを含めるかどうか。
+
+    normalize_histogram : bool, optional (default=False)
+        ヒストグラムを相対頻度（割合）として正規化するかどうか。
+
+    title : str, optional
+        グラフタイトル。None の場合は `col_bin` から自動推定。
+
+    verbose : bool, optional
+        処理途中のDataFrameを `display()` で表示するデバッグモード。
+
+    戻り値
+    -------
+    alt.Chart
+        Altair による棒グラフチャートオブジェクト。
+
+    使用例
+    -------
+    >>> chart = plot_histogram(df, col_bin="age_bin", df_bin_detail_info=bin_info)
+    >>> chart.display()
+
+    備考
+    ----
+    - `df_bin_detail_info` を渡すと、棒の幅や位置が連続的に表示され、視認性が向上する。
+    - カテゴリビンの場合は `x` のみ、連続ビンの場合は `x` + `x2` によるレンジ指定を行う。
+    - Polars と Altair を組み合わせて軽量な可視化が可能。
+    """    
+    if verbose:
+        print(f"col_bin: {col_bin}")
+        print('df:')
+        display(df)
     
-    # 色のスケール(変換ルール)を作成する
-    if col_color_scale_mode_hist == 'domain_range':
-        col_color_scale_hist=alt.Scale(domain=col_color_scale_domain, range=col_color_scale_range_hist)
-    else:
-        col_color_scale_hist=alt.Scale(scheme=col_color_scale_scheme_hist) 
-
-    # グラフ描画で必要な列
-    cols_needed = [col_bin]
-    if col_color_hist and col_color_hist not in cols_needed:
-        cols_needed.append(col_color_hist)
-
-    # グラフ描画で必要な列だけをselect
-    # col_color_histを持っているDataFrameが1つもない場合、col_color_histを外付けする(複数dfの場合などでdf自体への色付け指定と見做す)
-    any_df_has_col_color_hist = any(col_color_hist in df.columns for df in dfs)
-    dfs_selected = [
-        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(col_color_scale_domain[i]).alias(col_color_hist)) if not any_df_has_col_color_hist else
-        df.select([col for col in cols_needed if col in df.columns])
-        for i, df in enumerate(dfs)
-    ]
-
-    # binとcolorごとに集約する
-    # ついでに正規化(normalize)も行う
-    col_y = 'count'
-    def _agg(df:pl.DataFrame) -> pl.DataFrame:
-        group_keys = [col_bin]
-        if col_color_hist and (col_bin != col_color_hist):
-            group_keys.append(col_color_hist)
-        if normalize_hist == False:
-            expr = pl.len().alias(col_y)
+    if title is None:
+        if col_bin.endswith("_bin"):
+            title = col_bin.removesuffix("_bin")
         else:
-            expr = (pl.len() / pl.lit(len(df))).alias(col_y)
-        if verbose:
-            print(f'group_keys: {group_keys}')
-        df_agg = df.group_by(pl.col(group_keys)).agg(expr)
-        return df_agg
-    dfs_agg = [_agg(df) for df in dfs_selected]
+            title = col_bin
 
-    # 結合
-    df_agg_concat = pl.concat(dfs_agg)
-    if verbose:   
-        display(df_agg_concat)
+    col_y = 'count'
+    group_keys = [col_bin]
+    if col_color and (col_bin != col_color):
+        group_keys.append(col_color)
+    if normalize_histogram == False:
+        expr = pl.len().alias(col_y)
+    else:
+        expr = (pl.len() / pl.lit(len(df))).alias(col_y)
+    if verbose:
+        print(f'group_keys: {group_keys}')
+    df_agg = df.group_by(pl.col(group_keys)).agg(expr)
+
+    # # 固定色用のダミー列を仕込んでおく
+    # # 色設定のための仮の列を追加する(legend_title列、値はdata_name(trainなど)固定、色をそれにマッピング)
+    # if not col_color and color:
+    #     df_agg = df_agg.with_columns(pl.lit(data_name).alias('legend_label'))
+
+    if verbose:
+        print('df_agg:')
+        display(df_agg)
 
     if df_bin_detail_info is not None:
+        if verbose:
+            print('df_bin_detail_info:')
+            display(df_bin_detail_info)
 
-        df_agg_concat = df_agg_concat.join(df_bin_detail_info, on=col_bin, how='left')
+        df_agg = df_agg.join(df_bin_detail_info, on=col_bin, how='left')
+        if verbose:
+            print('df_agg(joint):')
+            display(df_agg)
 
         col_bin_start = f"{col_bin}_start"
         col_bin_end = f"{col_bin}_end"
+        assert col_bin_start in df_agg.columns, f"{col_bin_start} が df_agg に存在しません"
+        assert col_bin_end in df_agg.columns, f"{col_bin_end} が df_agg に存在しません"
 
-        df_plot = df_agg_concat.with_columns([
+        df_plot = df_agg.with_columns([
             pl.col(col_bin_start).alias("bin_left"),
             pl.col(col_bin_end).alias("bin_right"),
             pl.col(col_y).alias("bin_top"),
             pl.lit(0).alias("bin_bottom")
         ])
+        if verbose:
+            print('df_plot:')
+            display(df_plot)
 
         dtype = df_plot.schema["bin_left"]
         bin_type = "temporal" if dtype in (pl.Datetime, pl.Date) else "quantitative"
 
         chart = alt.Chart(df_plot).encode(
-            x=alt.X("bin_left", type=bin_type, title=None, scale=alt.Scale(zero=num_x_scale_zero_hist)),
+            x=alt.X("bin_left", type=bin_type, title=None, scale=alt.Scale(zero=num_x_scale_zero)),
             x2="bin_right",
             y=alt.Y("bin_bottom:Q", title="count"),
             y2=alt.Y2("bin_top:Q")
         )
 
     else:
-        chart = alt.Chart(df_agg_concat).encode(
+        chart = alt.Chart(df_agg).encode(
             x=alt.X(f"{col_bin}:N", title="category"),
             y=alt.Y(f"{col_y}:Q", title="count")
         )
 
-    chart = chart.mark_bar(opacity=bar_opacity_hist, stroke='gray', strokeWidth=1).properties(title=chart_title)
+    chart = chart.mark_bar(opacity=bar_opacity, stroke='gray', strokeWidth=1).properties(title=title)
 
     # mark_bar 後の色指定
-    if col_color_scale_hist:
-        chart = chart.encode(color=alt.Color(f'{col_color_hist}:N', legend=alt.Legend(title=col_color_legend_title_hist), scale=col_color_scale_hist))
+    if col_color_scale:
+        chart = chart.encode(color=alt.Color(f'{col_color}:N', legend=alt.Legend(title=col_color_legend_title), scale=col_color_scale))
     # if col_color:
     #     chart = chart.encode(color=alt.Color(f"{col_color}:N"))
     # elif color:
