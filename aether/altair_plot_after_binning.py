@@ -35,10 +35,7 @@ def plot_histogram_line_after_binning(
     num_x_scale_zero_hist: bool = False,
 
     # line
-    # data_color_line: list[str] = ['gold', 'orange'], # col_colorが指定されてない時に使われる固定色
     agg_func_line = pl.mean,
-    # col_color: str = None,
-    # color_scale_scheme_line: str = 'blues', # 'reds' # col_colorが指定された場合の色の系統
     num_y_scale_zero_line: bool = False,
     line_size: int = 1,
     line_opacity: float = 0.7,
@@ -72,19 +69,20 @@ def plot_histogram_line_after_binning(
     chart_hist = _plot_histogram_over_bin(
         *dfs,
         col_bin=col_bin,
-        # data_name=data_name_item,
         df_bin_detail_info=df_bin_detail_info,
         chart_title=chart_title,
+
         col_color_scale_domain=col_color_scale_domain,
-        # color=color_hist_item,
         col_color=col_color,
         col_color_scale_mode_hist=col_color_scale_mode_hist,
         col_color_scale_range_hist=col_color_scale_range_hist, # map先(色)
         col_color_scale_scheme_hist=col_color_scale_scheme_hist,
         col_color_legend_title_hist=col_color_legend_title_hist,
+
         bar_opacity_hist=bar_opacity_hist,
         normalize_hist=normalize_hist,
         num_x_scale_zero_hist=num_x_scale_zero_hist,
+
         verbose=verbose,
     )
     if verbose >= 2:
@@ -97,11 +95,6 @@ def plot_histogram_line_after_binning(
         col_x_bin=col_bin,
         col_y=col_target,
         df_bin_detail_info=df_bin_detail_info,
-        # col_target=col_target,
-        # data_name=data_name_item,
-        # col_color=col_color,
-        # color_scale_scheme=color_scale_scheme_line, # 'reds' # col_colorが指定された場合の色の系統
-        # color=color_line_item,
         chart_title=chart_title,
         col_color_scale_domain=col_color_scale_domain,
 
@@ -119,36 +112,6 @@ def plot_histogram_line_after_binning(
 
         verbose=verbose,
     )
-    # line_charts = []
-    # for i, df in enumerate(dfs):
-    #     if col_target not in df.columns:
-    #         continue
-    #     color_line_item = data_color_line[i] if data_color_line is not None and i < len(data_color_line) else None
-    #     data_name_item = data_name[i] if data_name is not None and i < len(data_name) else None
-    #     print(data_name_item)
-    #     chart = _plot_line_over_bin(
-    #         df,
-    #         col_bin=col_bin,
-    #         col_target=col_target,
-    #         data_name=data_name_item,
-    #         col_color=col_color,
-    #         color_scale_scheme=color_scale_scheme_line, # 'reds' # col_colorが指定された場合の色の系統
-    #         color=color_line_item,
-    #         df_bin_detail_info=df_bin_detail_info,
-    #         agg_func=agg_func_line,
-    #         num_y_scale_zero=num_y_scale_zero_line,
-    #         line_size=line_size,
-    #         line_opacity=line_opacity,
-    #         point_size=point_size,
-    #     )
-    #     if verbose >= 2:
-    #         display(chart)
-    #     line_charts.append(chart)
-    # chart_line_overlay = alt.layer(*line_charts).resolve_scale(
-    #     y='shared', color='independent'
-    # )
-    # if verbose >= 2:
-    #     display(chart_line_overlay)
 
     # 総合チャート（ヒストグラム＋折れ線群）
     chart = alt.layer(chart_hist, chart_line).resolve_scale(
@@ -281,12 +244,6 @@ def _plot_histogram_over_bin(
     # mark_bar 後の色指定
     if col_color_scale_hist:
         chart = chart.encode(color=alt.Color(f'{col_color}:N', legend=alt.Legend(title=col_color_legend_title_hist), scale=col_color_scale_hist))
-    # if col_color:
-    #     chart = chart.encode(color=alt.Color(f"{col_color}:N"))
-    # elif color:
-    #     legend_label = data_name
-    #     # chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=alt.Scale(domain=[legend_label], range=[color])))
-    #     chart = chart.encode(color=alt.Color(f"legend_label:N", legend=alt.Legend(title=None), scale=scale))
 
     return chart
 
@@ -298,23 +255,11 @@ def _plot_line_over_bin(
     *dfs: pl.DataFrame,
     col_x_bin: str,
     col_y: str,
-    # col_target: str,
     df_bin_detail_info: pl.DataFrame = None,
     agg_func_line = pl.mean,
     col_color_scale_domain: list[str] = ['train', 'test'], # map元(値)
     chart_title: str = None,
     
-    # col_color: str = None,
-    # color_scale_scheme: str = 'blues', # 'reds' # col_colorが指定された場合の色の系統
-    # color: str = 'gold', # col_colorが指定されてない時に使われる固定色
-    # data_name: str = 'train',
-    # line
-    # data_color_line: list[str] = ['gold', 'orange'], # col_colorが指定されてない時に使われる固定色
-    # agg_func_line = pl.mean,
-    # col_color: str = None,
-    # color_scale_scheme_line: str = 'blues', # 'reds' # col_colorが指定された場合の色の系統
-    # num_y_scale_zero_line: bool = False,
-
     col_color: str = None, # 優先
     col_color_scale_mode_line: Literal["scheme", "domain_range"] = "domain_range",
     col_color_scale_range_line: list[str] = ['gold', 'orange'], # map先(色)
@@ -327,8 +272,6 @@ def _plot_line_over_bin(
     num_y_scale_zero_line: bool = False,
     verbose: int = 0,
 ) -> alt.Chart:
-
-    col_y_agg = f'{col_y} ({agg_func_line.__name__})'
 
     if chart_title is None:
         if col_x_bin.endswith("_bin"):
@@ -355,13 +298,34 @@ def _plot_line_over_bin(
     # グラフ描画で必要な列だけをselect
     # col_color_histを持っているDataFrameが1つもない場合、col_color_histを外付けする(複数dfの場合などでdf自体への色付け指定と見做す)
     any_df_has_col_color_line = any(col_color in df.columns for df in dfs)
+
+    def _select_columns(
+        df: pl.DataFrame,
+        index: int,
+    ) -> pl.DataFrame:
+        # 必要な列のみselect
+        df_selected = df.select([col for col in cols_needed if col in df.columns])
+
+        # col_color 列が無いなら補う
+        if not any_df_has_col_color_line:
+            df_selected = df_selected.with_columns(
+                pl.lit(col_color_scale_domain[index]).alias(col_color)
+            )
+
+        # col_y 列が無いなら None で追加
+        if col_y not in df_selected.columns:
+            df_selected = df_selected.with_columns(
+                pl.lit(None).alias(col_y)
+            )
+
+        return df_selected
     dfs_selected = [
-        df.select([col for col in cols_needed if col in df.columns]).with_columns(pl.lit(col_color_scale_domain[i]).alias(col_color)) if not any_df_has_col_color_line else
-        df.select([col for col in cols_needed if col in df.columns])
-        for i, df in enumerate(dfs)
+        _select_columns(df, index)
+        for index, df in enumerate(dfs)
     ]
 
     # binとcolorごとに集約する
+    col_y_agg = f'{col_y} ({agg_func_line.__name__})'
     group_keys = [col_x_bin] + ([col_color] if col_color else [])
     dfs_agg = [
         df.group_by(group_keys).agg(agg_func_line(col_y).alias(col_y_agg))
