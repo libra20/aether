@@ -41,7 +41,6 @@ def plot_histogram_line_after_binning(
     line_opacity: float = 0.7,
     point_size: int = 5,
 
-    # col_color: str = None, # 優先
     col_color_scale_mode_line: Literal["scheme", "domain_range"] = "domain_range",
     col_color_scale_range_line: list[str] = ['gold', 'orange'], # map先(色)
     col_color_scale_scheme_line: str = 'category20',
